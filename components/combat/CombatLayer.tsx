@@ -139,7 +139,7 @@ export function CombatLayer() {
     writeInstances(bursts.current, combat.bursts.length, (i, obj, color) => {
       const b = combat.bursts[i];
       obj.position.set(b.x, b.y, b.z);
-      obj.scale.setScalar(1 + b.age * 6);
+      obj.scale.setScalar((b.size ?? 1) * (1 + b.age * 6));
       obj.rotation.set(0, 0, 0);
       color.set(b.color);
     });
@@ -153,7 +153,7 @@ export function CombatLayer() {
     writeInstances(rings.current, combat.bursts.length, (i, obj, color) => {
       const b = combat.bursts[i];
       obj.position.set(b.x, b.y, b.z);
-      obj.scale.setScalar(0.4 + b.age * 8);
+      obj.scale.setScalar((b.size ?? 1) * (0.4 + b.age * 8));
       obj.rotation.set(-Math.PI / 2, 0, 0);
       color.set(b.color);
     });
@@ -178,15 +178,15 @@ export function CombatLayer() {
         <ringGeometry args={[0.32, 0.7, 18]} />
         <meshBasicMaterial toneMapped={false} side={THREE.DoubleSide} transparent opacity={0.75} />
       </instancedMesh>
-      <instancedMesh ref={bursts} args={[undefined, undefined, 16]} frustumCulled={false}>
+      <instancedMesh ref={bursts} args={[undefined, undefined, 48]} frustumCulled={false}>
         <sphereGeometry args={[0.45, 10, 8]} />
         <meshBasicMaterial toneMapped={false} transparent opacity={0.55} depthWrite={false} />
       </instancedMesh>
-      <instancedMesh ref={sparks} args={[undefined, undefined, 80]} frustumCulled={false}>
+      <instancedMesh ref={sparks} args={[undefined, undefined, 220]} frustumCulled={false}>
         <octahedronGeometry args={[0.07, 0]} />
         <meshBasicMaterial toneMapped={false} />
       </instancedMesh>
-      <instancedMesh ref={rings} args={[undefined, undefined, 16]} frustumCulled={false}>
+      <instancedMesh ref={rings} args={[undefined, undefined, 48]} frustumCulled={false}>
         <ringGeometry args={[0.55, 0.72, 20]} />
         <meshBasicMaterial toneMapped={false} side={THREE.DoubleSide} transparent opacity={0.7} depthWrite={false} />
       </instancedMesh>

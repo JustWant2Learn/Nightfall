@@ -483,6 +483,36 @@ export const STREETLIGHTS: Placement[] = (() => {
   return list;
 })();
 
+export interface FireflyCluster {
+  x: number;
+  z: number;
+  count: number;
+  seed: number;
+  biome: Biome;
+}
+
+/** Sparse night glades — a handful of clusters, never near doors or arenas. */
+export const FIREFLY_CLUSTERS: FireflyCluster[] = (() => {
+  const list: FireflyCluster[] = [];
+  let guard = 0;
+  while (list.length < 9 && guard++ < 8000) {
+    const x = (rand() * 2 - 1) * (WORLD_HALF - 16);
+    const z = (rand() * 2 - 1) * (WORLD_HALF - 16);
+    const biome = biomeAt(x, z);
+    if (biome === "graveyard" && rand() < 0.78) continue;
+    if (nearSpawn(x, z)) continue;
+    if (nearGatePath(x, z)) continue;
+    if (nearBossArena(x, z, 8)) continue;
+    if (tooCloseToHouse(x, z, 8)) continue;
+    if (blocksDoorway(x, z)) continue;
+    if (tooClose(x, z, list, 38)) continue;
+    const count =
+      biome === "swamp" ? 6 + Math.floor(rand() * 2) : biome === "forest" ? 4 + Math.floor(rand() * 2) : 3;
+    list.push({ x, z, count, seed: Math.floor(rand() * 1_000_000), biome });
+  }
+  return list;
+})();
+
 /* ------------------------------------------------------------------------ */
 /* Powerups (re-rolled every run)                                            */
 /* ------------------------------------------------------------------------ */
@@ -661,7 +691,7 @@ function collideAabb(
 type LocalBox = [minX: number, maxX: number, minZ: number, maxZ: number];
 
 /** Solid pieces of a house in local space: four walls minus the door, plus porch rails. */
-function houseSolids(h: HousePlacement): LocalBox[] {
+export function houseSolids(h: HousePlacement): LocalBox[] {
   const hw = h.halfW;
   const hd = h.halfD;
   const t = WALL_THICKNESS;

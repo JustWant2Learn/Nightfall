@@ -7,6 +7,7 @@ import { CharacterModel } from "@/components/game/CharacterModel";
 import { audio } from "@/lib/audio";
 import { MODIFIERS, SKILLS, keyBiomeUnlocked, modifierFits, type ModifierId, type SkillId } from "@/lib/gameData";
 import { runtime, useGameStore, canOpenBoss, canPassArena, type Character } from "@/lib/store";
+import { raycastAim } from "@/lib/aim-ray";
 import {
   GATE_POSITION,
   TALISMANS,
@@ -62,7 +63,6 @@ export function Player({ character }: { character: Character }) {
   const fused = useRef<Set<string>>(new Set());
   const enteredArena = useRef<Set<string>>(new Set());
   const aimRay = useRef(new THREE.Raycaster());
-  const aimHit = useRef(new THREE.Vector3());
   const aimDir = useRef(new THREE.Vector3());
   const aimNdc = useRef(new THREE.Vector2());
 
@@ -133,51 +133,30 @@ export function Player({ character }: { character: Character }) {
     const dt = Math.min(delta, 0.05);
     const k = keys.current;
 
-    // Aim: always the camera ray through the reticle NDC (including while RMB-looking).
-    // Projectiles spawn on that ray so they travel through the exact point under the crosshair.
-    const AIM_RANGE = 56;
-    const groundY = group.position.y;
+    // Always aim through the on-screen reticle (even while RMB-looking).
     aimNdc.current.set(runtime.aimNdcX, runtime.aimNdcY);
     aimRay.current.setFromCamera(aimNdc.current, state.camera);
-    const ray = aimRay.current.ray;
-    aimDir.current.copy(ray.direction).normalize();
-
-    runtime.aimDirX = aimDir.current.x;
-    runtime.aimDirY = aimDir.current.y;
-    runtime.aimDirZ = aimDir.current.z;
-
-    // Muzzle = closest point on the aim ray that's still in front of the camera / near the hands.
-    const handX = group.position.x;
-    const handY = group.position.y + 0.72;
-    const handZ = group.position.z;
-    const toHandX = handX - ray.origin.x;
-    const toHandY = handY - ray.origin.y;
-    const toHandZ = handZ - ray.origin.z;
-    const along = Math.max(
-      1.15,
-      toHandX * aimDir.current.x + toHandY * aimDir.current.y + toHandZ * aimDir.current.z
-    );
-    runtime.muzzleX = ray.origin.x + aimDir.current.x * along;
-    runtime.muzzleY = ray.origin.y + aimDir.current.y * along;
-    runtime.muzzleZ = ray.origin.z + aimDir.current.z * along;
-
-    // Far aim point (or ground) for UI / facing — shots still use aimDir, not player→point.
-    aimHit.current.copy(ray.origin).addScaledVector(aimDir.current, AIM_RANGE);
-    if (aimDir.current.y < -0.02) {
-      const t = (groundY - ray.origin.y) / aimDir.current.y;
-      if (t > along + 0.5 && t < AIM_RANGE) {
-        aimHit.current.copy(ray.origin).addScaledVector(aimDir.current, t);
+    const origin = aimRay.current.ray.origin;
+    const direction = aimRay.current.ray.direction;
+    if (direction.lengthSq() > 0.0001) {
+      aimDir.current.copy(direction).normalize();
+      runtime.aimOx = origin.x;
+      runtime.aimOy = origin.y;
+      runtime.aimOz = origin.z;
+      runtime.aimDx = aimDir.current.x;
+      runtime.aimDy = aimDir.current.y;
+      runtime.aimDz = aimDir.current.z;
+      const extras =
+        runtime.bossAlive && !store.bossesDefeated.includes(runtime.bossId ?? "bear")
+          ? [{ x: runtime.bossX, y: 1.35, z: runtime.bossZ, r: 1.7 }]
+          : undefined;
+      const hit = raycastAim(origin.x, origin.y, origin.z, aimDir.current.x, aimDir.current.y, aimDir.current.z, extras);
+      runtime.aimX = hit.x;
+      runtime.aimY = hit.y;
+      runtime.aimZ = hit.z;
+      if (aimDir.current.x * aimDir.current.x + aimDir.current.z * aimDir.current.z > 0.0004) {
+        runtime.aimYaw = Math.atan2(-aimDir.current.x, -aimDir.current.z);
       }
-    }
-    runtime.aimX = aimHit.current.x;
-    runtime.aimY = aimHit.current.y;
-    runtime.aimZ = aimHit.current.z;
-
-    const flat = Math.hypot(aimDir.current.x, aimDir.current.z);
-    if (flat > 0.001) {
-      runtime.aimYaw = Math.atan2(-aimDir.current.x, -aimDir.current.z);
-    } else {
-      runtime.aimYaw = runtime.camYaw;
     }
 
     let move = new THREE.Vector2(0, 0);

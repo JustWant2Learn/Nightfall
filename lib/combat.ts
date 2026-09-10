@@ -6,6 +6,7 @@ import {
   type ModifierId,
   type SkillId,
 } from "@/lib/gameData";
+import { raycastWorld, type HitSurface } from "@/lib/aim-ray";
 import { audio } from "@/lib/audio";
 import { runtime, useGameStore } from "@/lib/store";
 
@@ -30,6 +31,8 @@ export interface Bolt {
   vampiric: boolean;
   color: string;
   radius: number;
+  /** World colliders this bolt has already punched through. */
+  pierced: string[];
 }
 
 export interface GroundTrap {
@@ -50,6 +53,7 @@ export interface Burst {
   z: number;
   age: number;
   color: string;
+  size: number;
 }
 
 export interface Beam {
@@ -154,31 +158,31 @@ export function tryFireSkill(now: number, heading: number, px: number, py: numbe
 
   combat.cooldownUntil = now + def.cooldown * (chargeMods && runtime.charge > 0.6 ? 1.15 : 1);
 
-  // Fire exactly along the camera→reticle ray (same path the crosshair is on).
-  let dirX = runtime.aimDirX;
-  let dirY = runtime.aimDirY;
-  let dirZ = runtime.aimDirZ;
-  const aimLen = Math.hypot(dirX, dirY, dirZ);
-  if (aimLen > 0.001) {
-    dirX /= aimLen;
-    dirY /= aimLen;
-    dirZ /= aimLen;
+  const originY = py + 0.72;
+  // Leave the character's hand and fly at the reticle hit (tree, house, boss, or ground).
+  let dirX = runtime.aimX - px;
+  let dirY = runtime.aimY - originY;
+  let dirZ = runtime.aimZ - pz;
+  const dirLen = Math.hypot(dirX, dirY, dirZ);
+  if (dirLen > 0.0001) {
+    dirX /= dirLen;
+    dirY /= dirLen;
+    dirZ /= dirLen;
   } else {
     dirX = -Math.sin(heading);
     dirY = 0;
     dirZ = -Math.cos(heading);
   }
-  const spawnX = runtime.muzzleX;
-  const spawnY = runtime.muzzleY;
-  const spawnZ = runtime.muzzleZ;
-  // Horizontal facing for traps / body-relative offsets.
+  const spawnX = px + dirX * 0.55;
+  const spawnY = originY + dirY * 0.55;
+  const spawnZ = pz + dirZ * 0.55;
   const flatLen = Math.hypot(dirX, dirZ) || 1;
   const flatX = dirX / flatLen;
   const flatZ = dirZ / flatLen;
 
   if (def.type === "defense") {
     runtime.wardUntil = now + 2.2 + level * 0.25;
-    spawnBurst(spawnX, spawnY, spawnZ, def.color);
+    spawnBurst(px, originY, pz, def.color);
     runtime.charge = 0;
     return true;
   }
@@ -200,12 +204,12 @@ export function tryFireSkill(now: number, heading: number, px: number, py: numbe
 
   if (def.type === "burst" || def.type === "melee") {
     const reach = def.type === "melee" ? 2.15 : 4.2;
-    const dx = runtime.bossX - spawnX;
-    const dy = 1.2 - spawnY;
-    const dz = runtime.bossZ - spawnZ;
+    const dx = runtime.bossX - px;
+    const dy = 1.2 - originY;
+    const dz = runtime.bossZ - pz;
     const toBoss = Math.hypot(dx, dy, dz) || 1;
     const aligned = (dx / toBoss) * dirX + (dy / toBoss) * dirY + (dz / toBoss) * dirZ;
-    const dist = Math.hypot(runtime.bossX - px, runtime.bossZ - pz);
+    const dist = Math.hypot(dx, dz);
     if (runtime.bossAlive && dist < reach + 1.2 && aligned > 0.15) {
       const dealt = hurtActiveBoss(damage, {
         piercing: hasMod(mods, "piercing") || skill === "shadowArrow",
@@ -229,7 +233,7 @@ export function tryFireSkill(now: number, heading: number, px: number, py: numbe
         hurtActiveBoss(damage * 0.45, { piercing: true });
       }
     }
-    spawnBurst(spawnX + dirX * 1.1, spawnY + dirY * 1.1, spawnZ + dirZ * 1.1, def.color);
+    spawnBurst(px + dirX * 1.1, originY + dirY * 1.1, pz + dirZ * 1.1, def.color);
     runtime.charge = 0;
     return true;
   }
@@ -242,43 +246,34 @@ export function tryFireSkill(now: number, heading: number, px: number, py: numbe
   const spread = hasMod(mods, "volleyBurst") ? 22 : hasMod(mods, "multishot") ? 16 : 0;
   const speed = skill === "fireBolt" ? 16 : 28;
 
-  // Build a stable basis around the aim ray for multishot fan.
-  let upX = 0;
-  let upY = 1;
-  let upZ = 0;
-  if (Math.abs(dirY) > 0.92) {
-    upX = 1;
-    upY = 0;
-    upZ = 0;
-  }
-  let sideX = upY * dirZ - upZ * dirY;
-  let sideY = upZ * dirX - upX * dirZ;
-  let sideZ = upX * dirY - upY * dirX;
-  const sideLen = Math.hypot(sideX, sideY, sideZ) || 1;
-  sideX /= sideLen;
-  sideY /= sideLen;
-  sideZ /= sideLen;
-
   for (let i = 0; i < count; i++) {
     const t = count === 1 ? 0 : (i / (count - 1) - 0.5) * (spread * Math.PI) / 180;
-    const c = Math.cos(t);
-    const s = Math.sin(t);
-    let sx = dirX * c + sideX * s;
-    let sy = dirY * c + sideY * s;
-    let sz = dirZ * c + sideZ * s;
-    const sl = Math.hypot(sx, sy, sz) || 1;
-    sx /= sl;
-    sy /= sl;
-    sz /= sl;
+    let vx: number;
+    let vy: number;
+    let vz: number;
+    if (t === 0) {
+      vx = dirX * speed;
+      vy = dirY * speed;
+      vz = dirZ * speed;
+    } else {
+      const c = Math.cos(t);
+      const s = Math.sin(t);
+      const sx = flatX * c - flatZ * s;
+      const sz = flatX * s + flatZ * c;
+      const spreadLen = Math.hypot(sx, dirY, sz) || 1;
+      vx = (sx / spreadLen) * speed;
+      vy = (dirY / spreadLen) * speed;
+      vz = (sz / spreadLen) * speed;
+    }
     combat.bolts.push({
       id: combat.nextId++,
       skill,
-      x: spawnX + sx * 0.2,
-      y: spawnY + sy * 0.2,
-      z: spawnZ + sz * 0.2,
-      vx: sx * speed,
-      vy: sy * speed,
-      vz: sz * speed,
+      x: spawnX,
+      y: spawnY,
+      z: spawnZ,
+      vx,
+      vy,
+      vz,
       life: 2.4,
       damage,
       piercing: hasMod(mods, "piercing") || skill === "shadowArrow",
@@ -291,36 +286,90 @@ export function tryFireSkill(now: number, heading: number, px: number, py: numbe
       vampiric: hasMod(mods, "vampiric"),
       color: corrupted ? "#ff2a2a" : def.color,
       radius: skill === "fireBolt" ? 0.28 : 0.16,
+      pierced: [],
     });
   }
-  spawnBurst(spawnX + dirX * 0.45, spawnY + dirY * 0.45, spawnZ + dirZ * 0.45, def.color);
+  spawnBurst(spawnX + dirX * 0.25, spawnY + dirY * 0.25, spawnZ + dirZ * 0.25, def.color);
   runtime.charge = 0;
   return true;
 }
 
-export function spawnBurst(x: number, y: number, z: number, color: string): void {
-  combat.bursts.push({ id: combat.nextId++, x, y, z, age: 0, color });
+export function spawnBurst(x: number, y: number, z: number, color: string, size = 1): void {
+  combat.bursts.push({ id: combat.nextId++, x, y, z, age: 0, color, size });
 }
 
 /** Flash + sparks at the point a skill connects with a boss. */
 export function spawnImpact(x: number, y: number, z: number, color: string): void {
   audio.impact();
-  spawnBurst(x, y, z, color);
-  for (let i = 0; i < 10; i++) {
+  spawnBurst(x, y, z, color, 1.15);
+  spraySparks(x, y, z, 0, 1, 0, color, 10, 4.2, 1.4);
+}
+
+function isArrowSkill(skill: SkillId): boolean {
+  return skill === "arrow" || skill === "shadowArrow";
+}
+
+function piercesSurface(bolt: Bolt, surface: HitSurface): boolean {
+  if (bolt.explosive) return false;
+  if (surface === "wood") return isArrowSkill(bolt.skill) || bolt.piercing;
+  return false;
+}
+
+function spraySparks(
+  x: number,
+  y: number,
+  z: number,
+  vx: number,
+  vy: number,
+  vz: number,
+  color: string,
+  count: number,
+  speed: number,
+  lift: number
+): void {
+  const len = Math.hypot(vx, vy, vz) || 1;
+  const fx = vx / len;
+  const fy = vy / len;
+  const fz = vz / len;
+  for (let i = 0; i < count; i++) {
     const a = Math.random() * Math.PI * 2;
-    const p = 0.35 + Math.random() * 0.9;
+    const p = 0.35 + Math.random();
     combat.sparks.push({
       id: combat.nextId++,
       x,
       y,
       z,
-      vx: Math.cos(a) * p * 4,
-      vy: 1.4 + Math.random() * 3.2,
-      vz: Math.sin(a) * p * 4,
+      vx: -fx * speed * 0.35 + Math.cos(a) * p * speed,
+      vy: -fy * speed * 0.2 + lift + Math.random() * speed * 0.55,
+      vz: -fz * speed * 0.35 + Math.sin(a) * p * speed,
       age: 0,
       color,
     });
   }
+  if (combat.sparks.length > 220) combat.sparks.splice(0, combat.sparks.length - 220);
+}
+
+function spawnWorldImpact(bolt: Bolt, x: number, y: number, z: number, surface: HitSurface): void {
+  if (bolt.explosive) {
+    spawnImpact(x, y, z, "#ff9a40");
+    return;
+  }
+  if (surface === "wood") {
+    audio.thwack();
+    spawnBurst(x, y, z, "#c48a4a", 0.38);
+    spraySparks(x, y, z, bolt.vx, bolt.vy, bolt.vz, "#c4a06a", 8, 3.4, 0.8);
+    spraySparks(x, y, z, bolt.vx, bolt.vy, bolt.vz, "#6a4428", 4, 2.2, 0.4);
+    return;
+  }
+  if (surface === "ground") {
+    audio.thwack();
+    spawnBurst(x, y, z, "#8a7a58", 0.42);
+    spraySparks(x, y, z, bolt.vx, bolt.vy, bolt.vz, "#9a8a68", 7, 2.6, 1.1);
+    return;
+  }
+  audio.impact();
+  spawnBurst(x, y, z, "#c8c4bc", 0.55);
+  spraySparks(x, y, z, bolt.vx, bolt.vy, bolt.vz, "#d0ccc4", 8, 3.6, 1.2);
 }
 
 function spawnSplit(from: Bolt): void {
@@ -339,6 +388,7 @@ function spawnSplit(from: Bolt): void {
       life: 0.7,
       split: false,
       damage: from.damage * 0.55,
+      pierced: [...from.pierced],
     });
   }
 }
@@ -363,17 +413,56 @@ export function stepCombat(dt: number): void {
       b.vy = (b.vy / s) * speed;
       b.vz = (b.vz / s) * speed;
     }
-    b.x += b.vx * dt;
-    b.y += b.vy * dt;
-    b.z += b.vz * dt;
+
+    const travel = Math.hypot(b.vx, b.vy, b.vz) * dt;
+    let ox = b.x;
+    let oy = b.y;
+    let oz = b.z;
+    const speedNow = Math.hypot(b.vx, b.vy, b.vz) || 1;
+    const dirX = b.vx / speedNow;
+    const dirY = b.vy / speedNow;
+    const dirZ = b.vz / speedNow;
+    let remaining = travel;
+    let stopped = false;
+    const ignore = new Set(b.pierced);
+    let hops = 0;
+    while (remaining > 0.001 && hops < 6) {
+      hops += 1;
+      const hit = raycastWorld(ox, oy, oz, dirX, dirY, dirZ, remaining, ignore);
+      if (!hit) {
+        ox += dirX * remaining;
+        oy += dirY * remaining;
+        oz += dirZ * remaining;
+        remaining = 0;
+        break;
+      }
+      spawnWorldImpact(b, hit.x, hit.y, hit.z, hit.surface);
+      if (!piercesSurface(b, hit.surface)) {
+        ox = hit.x;
+        oy = hit.y;
+        oz = hit.z;
+        stopped = true;
+        break;
+      }
+      b.pierced.push(hit.id);
+      ignore.add(hit.id);
+      const skip = hit.t + 0.06;
+      ox = hit.x + dirX * 0.06;
+      oy = hit.y + dirY * 0.06;
+      oz = hit.z + dirZ * 0.06;
+      remaining = Math.max(0, remaining - skip);
+    }
+    b.x = ox;
+    b.y = oy;
+    b.z = oz;
     b.life -= dt;
     if (b.ricochet && !b.bounced && (Math.abs(b.x) > half || Math.abs(b.z) > half)) {
       if (Math.abs(b.x) > half) b.vx *= -1;
       if (Math.abs(b.z) > half) b.vz *= -1;
       b.bounced = true;
     }
-    let hit = false;
-    if (runtime.bossAlive) {
+    let hitBoss = false;
+    if (!stopped && runtime.bossAlive) {
       const dx = b.x - runtime.bossX;
       const dy = b.y - 1.2;
       const dz = b.z - runtime.bossZ;
@@ -397,14 +486,14 @@ export function stepCombat(dt: number): void {
           hurtActiveBoss(b.damage * 0.4, { piercing: true });
         }
         if (b.split) spawnSplit(b);
-        hit = true;
+        hitBoss = true;
       }
     }
-    if (hit && !b.piercing) {
+    if (stopped || (hitBoss && !b.piercing)) {
       combat.bolts.splice(i, 1);
       continue;
     }
-    if (b.life <= 0 || Math.abs(b.x) > 190 || Math.abs(b.z) > 190 || b.y < -4 || b.y > 40) {
+    if (b.life <= 0 || Math.abs(b.x) > 190 || Math.abs(b.z) > 190 || b.y < -0.45 || b.y > 40) {
       combat.bolts.splice(i, 1);
     }
   }
@@ -433,7 +522,7 @@ export function stepCombat(dt: number): void {
     s.x += s.vx * dt;
     s.y += s.vy * dt;
     s.z += s.vz * dt;
-    if (s.age > 0.38) combat.sparks.splice(i, 1);
+    if (s.age > 0.48) combat.sparks.splice(i, 1);
   }
 
   for (let i = combat.bursts.length - 1; i >= 0; i--) {

@@ -166,6 +166,25 @@ class NightfallAudio {
     this.noiseBurst(0.08, 1800, 900, 0.08, 4);
   }
 
+  /** Dry wood knock when an arrow punches through a tree or wall. */
+  thwack(): void {
+    if (!this.ctx || !this.master) return;
+    const ctx = this.ctx;
+    const t0 = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(190, t0);
+    osc.frequency.exponentialRampToValueAtTime(90, t0 + 0.07);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.1, t0);
+    gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.09);
+    osc.connect(gain);
+    gain.connect(this.master);
+    osc.start(t0);
+    osc.stop(t0 + 0.1);
+    this.noiseBurst(0.07, 1400, 500, 0.07, 3);
+  }
+
   /** Sharp crack when a skill lands on a boss. */
   impact(): void {
     if (!this.ctx || !this.master) return;

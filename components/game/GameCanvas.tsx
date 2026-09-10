@@ -83,16 +83,45 @@ export function GameCanvas({ character }: { character: Character }) {
     const el = wrapper.current;
     if (!el) return;
 
-    const syncCursor = (clientX: number, clientY: number) => {
+    const writeNdc = () => {
       const rect = el.getBoundingClientRect();
-      const x = clientX - rect.left;
-      const y = clientY - rect.top;
-      runtime.cursorX = x;
-      runtime.cursorY = y;
       const w = Math.max(1, rect.width);
       const h = Math.max(1, rect.height);
-      runtime.aimNdcX = (x / w) * 2 - 1;
-      runtime.aimNdcY = -((y / h) * 2 - 1);
+      runtime.cursorX = Math.min(w, Math.max(0, runtime.cursorX));
+      runtime.cursorY = Math.min(h, Math.max(0, runtime.cursorY));
+      runtime.aimNdcX = (runtime.cursorX / w) * 2 - 1;
+      runtime.aimNdcY = -((runtime.cursorY / h) * 2 - 1);
+    };
+
+    const seedCursor = (clientX: number, clientY: number) => {
+      const rect = el.getBoundingClientRect();
+      runtime.cursorX = clientX - rect.left;
+      runtime.cursorY = clientY - rect.top;
+      writeNdc();
+    };
+
+    let cursorSeeded = false;
+    let ignoreCursorUntil = 0;
+
+    const canvasEl = () => el.querySelector("canvas");
+
+    const beginLook = () => {
+      runtime.looking = true;
+      ignoreCursorUntil = performance.now() + 120;
+      const canvas = canvasEl();
+      if (!canvas || document.pointerLockElement === canvas) return;
+      const pending = canvas.requestPointerLock();
+      if (pending && typeof pending.catch === "function") {
+        pending.catch(() => {
+          /* Browser may deny lock; look still works with movement until the OS edge. */
+        });
+      }
+    };
+
+    const endLook = () => {
+      runtime.looking = false;
+      ignoreCursorUntil = performance.now() + 120;
+      if (document.pointerLockElement) document.exitPointerLock();
     };
 
     const onMouseMove = (e: MouseEvent) => {
@@ -104,7 +133,15 @@ export function GameCanvas({ character }: { character: Character }) {
         );
         return;
       }
-      syncCursor(e.clientX, e.clientY);
+      if (performance.now() < ignoreCursorUntil) return;
+      if (!cursorSeeded) {
+        seedCursor(e.clientX, e.clientY);
+        cursorSeeded = true;
+        return;
+      }
+      runtime.cursorX += e.movementX;
+      runtime.cursorY += e.movementY;
+      writeNdc();
     };
 
     const onMouseDown = (e: MouseEvent) => {
@@ -113,12 +150,14 @@ export function GameCanvas({ character }: { character: Character }) {
         if (e.button === 0) {
           runtime.paused = false;
           runtime.hadFocus = true;
+          seedCursor(e.clientX, e.clientY);
+          cursorSeeded = true;
         }
         return;
       }
       if (e.button === 2) {
         e.preventDefault();
-        runtime.looking = true;
+        beginLook();
         return;
       }
       if (e.button === 0) {
@@ -128,7 +167,7 @@ export function GameCanvas({ character }: { character: Character }) {
     };
 
     const onMouseUp = (e: MouseEvent) => {
-      if (e.button === 2) runtime.looking = false;
+      if (e.button === 2) endLook();
       if (e.button === 0) runtime.fireHeld = false;
     };
 
@@ -137,8 +176,20 @@ export function GameCanvas({ character }: { character: Character }) {
     };
 
     const onBlur = () => {
-      runtime.looking = false;
+      endLook();
       runtime.fireHeld = false;
+    };
+
+    const onLockChange = () => {
+      if (!document.pointerLockElement && runtime.looking) {
+        runtime.looking = false;
+      }
+      ignoreCursorUntil = performance.now() + 120;
+    };
+
+    const onLockError = (event: Event) => {
+      event.preventDefault();
+      event.stopPropagation();
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
@@ -146,7 +197,7 @@ export function GameCanvas({ character }: { character: Character }) {
       if (useGameStore.getState().skillMenuOpen) return;
       if (!runtime.paused && runtime.hadFocus) {
         runtime.paused = true;
-        runtime.looking = false;
+        endLook();
         runtime.fireHeld = false;
       }
     };
@@ -156,6 +207,8 @@ export function GameCanvas({ character }: { character: Character }) {
     window.addEventListener("mouseup", onMouseUp);
     window.addEventListener("blur", onBlur);
     window.addEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerlockchange", onLockChange);
+    document.addEventListener("pointerlockerror", onLockError);
     el.addEventListener("contextmenu", onContextMenu);
     return () => {
       window.removeEventListener("mousemove", onMouseMove);
@@ -163,6 +216,8 @@ export function GameCanvas({ character }: { character: Character }) {
       window.removeEventListener("mouseup", onMouseUp);
       window.removeEventListener("blur", onBlur);
       window.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("pointerlockchange", onLockChange);
+      document.removeEventListener("pointerlockerror", onLockError);
       el.removeEventListener("contextmenu", onContextMenu);
     };
   }, []);

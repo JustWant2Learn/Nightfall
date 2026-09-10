@@ -4,6 +4,7 @@ import { useLayoutEffect, useMemo, useRef, type RefObject } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { useGameStore } from "@/lib/store";
+import { Fireflies } from "@/components/game/Fireflies";
 import { Houses } from "@/components/game/Houses";
 import { Streetlights } from "@/components/game/Streetlights";
 import { Trees } from "@/components/game/Trees";
@@ -144,6 +145,7 @@ export function World() {
       </instancedMesh>
 
       <Trees />
+      <Fireflies />
 
       <instancedMesh ref={rocks} args={[undefined, undefined, ROCKS.length]} receiveShadow>
         <dodecahedronGeometry args={[0.5, 0]} />
