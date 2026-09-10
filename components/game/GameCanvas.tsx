@@ -4,14 +4,18 @@ import { Component, useEffect, useRef, type ErrorInfo, type ReactNode } from "re
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Stars } from "@react-three/drei";
 import * as THREE from "three";
+import { CombatLayer } from "@/components/combat/CombatLayer";
+import { BossArenas } from "@/components/game/BossArena";
+import { Bosses } from "@/components/game/Bosses";
+import { FusionAltars } from "@/components/game/FusionAltar";
 import { LightingRig } from "@/components/game/LightingRig";
 import { LightPool } from "@/components/game/LightPool";
-import { Monster } from "@/components/game/Monster";
 import { Player } from "@/components/game/Player";
+import { PowerPickups } from "@/components/game/PowerPickups";
 import { Powerups } from "@/components/game/Powerups";
 import { Talismans } from "@/components/game/Talismans";
 import { World } from "@/components/game/World";
-import { runtime, type Character } from "@/lib/store";
+import { runtime, useGameStore, type Character } from "@/lib/store";
 import { BIOME_INFO } from "@/lib/world-data";
 
 const PITCH_MIN = 0.08;
@@ -86,6 +90,11 @@ export function GameCanvas({ character }: { character: Character }) {
         runtime.paused = false;
         return;
       }
+      if (useGameStore.getState().skillMenuOpen) {
+        runtime.paused = true;
+        unlockedAt.current = 0;
+        return;
+      }
       unlockedAt.current = performance.now();
       if (runtime.hadPointerLock) {
         runtime.paused = true;
@@ -95,17 +104,31 @@ export function GameCanvas({ character }: { character: Character }) {
       event.preventDefault();
       event.stopPropagation();
     };
+    const onMouseDown = (e: MouseEvent) => {
+      if (!document.pointerLockElement || e.button !== 0) return;
+      runtime.fireHeld = true;
+      runtime.fireClicked = true;
+    };
+    const onMouseUp = (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      runtime.fireHeld = false;
+    };
     document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("mouseup", onMouseUp);
     document.addEventListener("pointerlockchange", onLockChange);
     document.addEventListener("pointerlockerror", onLockError);
     return () => {
       document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("mouseup", onMouseUp);
       document.removeEventListener("pointerlockchange", onLockChange);
       document.removeEventListener("pointerlockerror", onLockError);
     };
   }, []);
 
   const enterForest = () => {
+    if (useGameStore.getState().skillMenuOpen) return;
     runtime.paused = false;
     if (document.pointerLockElement) return;
     if (performance.now() - unlockedAt.current < 1300) return;
@@ -148,8 +171,12 @@ export function GameCanvas({ character }: { character: Character }) {
           <World />
           <Talismans />
           <Powerups />
+          <PowerPickups />
+          <FusionAltars />
+          <BossArenas />
           <Player character={character} />
-          <Monster />
+          <CombatLayer />
+          <Bosses />
         </SceneErrorBoundary>
       </Canvas>
     </div>

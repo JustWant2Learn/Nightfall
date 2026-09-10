@@ -122,8 +122,8 @@ function EndScreen() {
           YOU ESCAPED
         </h2>
         <p className="max-w-md text-sm text-white/55">
-          You slipped through the gate as the forest screamed behind you. All {total}{" "}
-          talismans recovered. The Hollow One hunts alone tonight.
+          You slipped through the gate. The Rotting Bear, the Ogre, and the Hollow
+          One are quiet. {collected} / {total} talismans came with you.
         </p>
         <div className="flex gap-3">
           <Button size="lg" onClick={retry} className="gap-2">

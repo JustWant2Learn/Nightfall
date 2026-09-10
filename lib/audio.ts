@@ -147,6 +147,44 @@ class NightfallAudio {
     noise.stop(ctx.currentTime + duration + 0.05);
   }
 
+  /** Short dry snap when a skill is fired. */
+  cast(): void {
+    if (!this.ctx || !this.master) return;
+    const ctx = this.ctx;
+    const t0 = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = "square";
+    osc.frequency.setValueAtTime(420, t0);
+    osc.frequency.exponentialRampToValueAtTime(180, t0 + 0.09);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.14, t0);
+    gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.12);
+    osc.connect(gain);
+    gain.connect(this.master);
+    osc.start(t0);
+    osc.stop(t0 + 0.14);
+    this.noiseBurst(0.08, 1800, 900, 0.08, 4);
+  }
+
+  /** Sharp crack when a skill lands on a boss. */
+  impact(): void {
+    if (!this.ctx || !this.master) return;
+    const ctx = this.ctx;
+    const t0 = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(240, t0);
+    osc.frequency.exponentialRampToValueAtTime(70, t0 + 0.14);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.22, t0);
+    gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.16);
+    osc.connect(gain);
+    gain.connect(this.master);
+    osc.start(t0);
+    osc.stop(t0 + 0.18);
+    this.noiseBurst(0.12, 2200, 700, 0.12, 5);
+  }
+
   collect(): void {
     if (!this.ctx || !this.master) return;
     const ctx = this.ctx;

@@ -5,12 +5,16 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { CharacterModel } from "@/components/game/CharacterModel";
 import { audio } from "@/lib/audio";
-import { runtime, useGameStore, type Character } from "@/lib/store";
+import { MODIFIERS, SKILLS, keyBiomeUnlocked, modifierFits, type ModifierId, type SkillId } from "@/lib/gameData";
+import { runtime, useGameStore, canOpenBoss, canPassArena, type Character } from "@/lib/store";
 import {
   GATE_POSITION,
   TALISMANS,
   WORLD_HALF,
+  arenaAt,
   biomeAt,
+  nearAltar,
+  resolveLockedArenas,
   resolveWorldCollision,
   safeHouseAt,
 } from "@/lib/world-data";
@@ -20,6 +24,19 @@ const SPRINT_SPEED = 7.2;
 const CAMERA_DISTANCE = 4.3;
 const GRAVITY = 24;
 const JUMP_VELOCITY = 8.2;
+
+function cycleModifier(skill: SkillId): void {
+  const store = useGameStore.getState();
+  const def = SKILLS[skill];
+  if (!def) return;
+  const fitted = store.ownedModifiers.filter((id) => modifierFits(MODIFIERS[id], def));
+  if (fitted.length === 0) return;
+  const current = store.loadout[skill] ?? [];
+  const last = current[current.length - 1];
+  const idx = last ? fitted.indexOf(last) : -1;
+  const next = fitted[(idx + 1) % fitted.length] as ModifierId;
+  store.slotModifier(skill, next);
+}
 
 function lerpAngle(from: number, to: number, t: number): number {
   let diff = (to - from) % (Math.PI * 2);
@@ -41,11 +58,49 @@ export function Player({ character }: { character: Character }) {
   const camDist = useRef(CAMERA_DISTANCE);
   const picked = useRef<Set<number>>(new Set());
   const grabbed = useRef<Set<number>>(new Set());
+  const looted = useRef<Set<string>>(new Set());
+  const fused = useRef<Set<string>>(new Set());
+  const enteredArena = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      if (e.code === "Space") e.preventDefault();
+      if (e.code === "Space" || e.code === "Tab") e.preventDefault();
+      const store = useGameStore.getState();
+      if (e.code === "Tab") {
+        const next = !store.skillMenuOpen;
+        store.setSkillMenuOpen(next);
+        keys.current.clear();
+        if (next && document.pointerLockElement) document.exitPointerLock();
+        return;
+      }
+      if (e.code === "Escape" && store.skillMenuOpen) {
+        store.setSkillMenuOpen(false);
+        return;
+      }
+      if (store.skillMenuOpen) return;
       keys.current.add(e.code);
+      const skillKeys: Record<string, number> = {
+        Digit1: 0,
+        Digit2: 1,
+        Digit3: 2,
+        Digit4: 3,
+        Digit5: 4,
+        Digit6: 5,
+      };
+      if (e.code in skillKeys) {
+        const skill = store.unlockedSkills[skillKeys[e.code]];
+        if (skill) store.setActiveSkill(skill);
+      }
+      if (e.code === "KeyE") runtime.fireClicked = true;
+      if (e.code === "KeyR") store.levelSkill(store.activeSkill);
+      if (e.code === "KeyT") cycleModifier(store.activeSkill);
+      if (e.code === "KeyF") {
+        const altar = nearAltar(runtime.playerX, runtime.playerZ);
+        if (altar && !fused.current.has(altar.id) && store.fuseAtAltar()) {
+          fused.current.add(altar.id);
+          audio.powerup();
+        }
+      }
     };
     const up = (e: KeyboardEvent) => keys.current.delete(e.code);
     window.addEventListener("keydown", down);
@@ -119,8 +174,14 @@ export function Player({ character }: { character: Character }) {
         nz + move.y * speedRef.current * air * dt,
         0.35
       );
-      nx = THREE.MathUtils.clamp(resolved.x, -(WORLD_HALF - 2), WORLD_HALF - 2);
-      nz = THREE.MathUtils.clamp(resolved.z, -(WORLD_HALF - 2), WORLD_HALF - 2);
+      const unlocked = {
+        bear: canPassArena(store, "bear"),
+        ogre: canPassArena(store, "ogre"),
+        hollow: canPassArena(store, "hollow"),
+      };
+      const gated = resolveLockedArenas(resolved.x, resolved.z, 0.35, unlocked);
+      nx = THREE.MathUtils.clamp(gated.x, -(WORLD_HALF - 2), WORLD_HALF - 2);
+      nz = THREE.MathUtils.clamp(gated.z, -(WORLD_HALF - 2), WORLD_HALF - 2);
 
       const targetHeading = Math.atan2(move.x, move.y);
       heading.current = lerpAngle(heading.current, targetHeading, 1 - Math.exp(-12 * dt));
@@ -150,7 +211,24 @@ export function Player({ character }: { character: Character }) {
       const heal = safe ? 5 : 0.5;
       runtime.health = Math.min(stats.maxHealth, runtime.health + heal * dt);
     }
+    if (!paused && safe && runtime.corruption > 0) {
+      runtime.corruption = Math.max(0, runtime.corruption - 8 * dt);
+    }
+    const shrine = nearAltar(nx, nz);
+    runtime.nearAltarId = shrine?.id ?? null;
     runtime.hitFlash = Math.max(0, runtime.hitFlash - dt * 1.8);
+
+    const inside = arenaAt(nx, nz);
+    if (
+      inside &&
+      canOpenBoss(store, inside.bossId) &&
+      !store.arenasOpened.includes(inside.bossId) &&
+      !enteredArena.current.has(inside.bossId)
+    ) {
+      enteredArena.current.add(inside.bossId);
+      audio.powerup();
+      queueMicrotask(() => useGameStore.getState().enterArena(inside.bossId));
+    }
 
     // Powerup pickup — deferred like talismans so React never reconciles mid-frame.
     const powerups = store.powerups;
@@ -162,6 +240,20 @@ export function Player({ character }: { character: Character }) {
         grabbed.current.add(i);
         audio.powerup();
         queueMicrotask(() => useGameStore.getState().takePowerup(i));
+      }
+    }
+
+    const loot = store.powerLoot;
+    for (let i = 0; i < loot.length; i++) {
+      const item = loot[i];
+      if (looted.current.has(item.id) || store.lootTaken.includes(item.id)) continue;
+      if (item.kind === "keyPiece" && !keyBiomeUnlocked(item.biome, store.bossesDefeated)) continue;
+      const dx = nx - item.x;
+      const dz = nz - item.z;
+      if (dx * dx + dz * dz < 1.5 * 1.5) {
+        looted.current.add(item.id);
+        audio.powerup();
+        queueMicrotask(() => useGameStore.getState().takeLoot(item.id));
       }
     }
 

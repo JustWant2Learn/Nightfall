@@ -340,7 +340,7 @@ function Roots({
  * long the root-hands drag on the ground, spindly legs ending in roots,
  * a crown of antler branches, and moss clumps sprouting from its back.
  */
-function TreantMesh({
+export function TreantMesh({
   leftEye,
   rightEye,
   leftArm,

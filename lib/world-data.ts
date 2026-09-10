@@ -105,6 +105,35 @@ export interface PowerupPlacement {
   type: PowerupType;
 }
 
+export type PowerLootKind = "fragment" | "skillShard" | "modifier" | "keyPiece" | "cursedRelic";
+
+export interface PowerLootPlacement {
+  id: string;
+  kind: PowerLootKind;
+  x: number;
+  z: number;
+  biome: Biome;
+  skillId?: string;
+  modifierId?: string;
+  keyIndex?: number;
+}
+
+export interface ArenaDef {
+  bossId: "bear" | "ogre" | "hollow";
+  x: number;
+  z: number;
+  radius: number;
+  /** Facing toward spawn so the gate reads as an entrance. */
+  rot: number;
+}
+
+export interface AltarPlacement {
+  id: string;
+  x: number;
+  z: number;
+  biome: Biome;
+}
+
 /* ------------------------------------------------------------------------ */
 /* Helpers                                                                   */
 /* ------------------------------------------------------------------------ */
@@ -133,6 +162,30 @@ function nearGatePath(x: number, z: number): boolean {
 
 function nearSpawn(x: number, z: number): boolean {
   return x * x + z * z < 11 * 11;
+}
+
+/** Ritual rings where the three bosses wait. Kept clear of trees and houses. */
+export const BOSS_ARENAS: ArenaDef[] = [
+  { bossId: "bear", x: 12, z: 102, radius: 16, rot: Math.atan2(-12, -102) },
+  { bossId: "ogre", x: -95, z: -88, radius: 16, rot: Math.atan2(95, 88) },
+  { bossId: "hollow", x: 95, z: -88, radius: 16, rot: Math.atan2(-95, 88) },
+];
+
+export const FUSION_ALTARS: AltarPlacement[] = [
+  { id: "woods-shrine", x: -26, z: 44, biome: "forest" },
+  { id: "marsh-shrine", x: -72, z: -52, biome: "swamp" },
+];
+
+export function nearBossArena(x: number, z: number, pad = 4): boolean {
+  return BOSS_ARENAS.some((a) => (x - a.x) ** 2 + (z - a.z) ** 2 < (a.radius + pad) ** 2);
+}
+
+export function arenaAt(x: number, z: number): ArenaDef | null {
+  return BOSS_ARENAS.find((a) => (x - a.x) ** 2 + (z - a.z) ** 2 < a.radius * a.radius) ?? null;
+}
+
+export function nearAltar(x: number, z: number, reach = 2.4): AltarPlacement | null {
+  return FUSION_ALTARS.find((a) => (x - a.x) ** 2 + (z - a.z) ** 2 < reach * reach) ?? null;
 }
 
 /**
@@ -315,6 +368,7 @@ export const TREES: Placement[] = (() => {
     if (biome === "graveyard" && keep < 0.5) continue;
     if (nearSpawn(x, z)) continue;
     if (nearGatePath(x, z)) continue;
+    if (nearBossArena(x, z, 3)) continue;
     if (tooCloseToHouse(x, z, 2.8)) continue;
     if (blocksDoorway(x, z)) continue;
     if (tooClose(x, z, TALISMANS, 2.6)) continue;
@@ -343,6 +397,7 @@ export const TOMBSTONES: Placement[] = (() => {
     const z = -(45 + rand() * (WORLD_HALF - 52));
     if (biomeAt(x, z) !== "graveyard") continue;
     if (nearGatePath(x, z)) continue;
+    if (nearBossArena(x, z, 2)) continue;
     if (tooClose(x, z, TREES, 1.2)) continue;
     if (tooCloseToHouse(x, z, 2)) continue;
     if (blocksDoorway(x, z)) continue;
@@ -454,12 +509,122 @@ export function generatePowerups(seed: number): PowerupPlacement[] {
     const z = (r() * 2 - 1) * (WORLD_HALF - 10);
     if (x * x + z * z < 16 * 16) continue;
     if (nearGatePath(x, z)) continue;
+    if (nearBossArena(x, z, 2)) continue;
     if (tooCloseToHouse(x, z, 2)) continue;
     if (tooClose(x, z, TREES, 1.5)) continue;
     if (tooClose(x, z, TALISMANS, 5)) continue;
     if (tooClose(x, z, list, 24)) continue;
     list.push({ x, z, type: types[list.length] });
   }
+  return list;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Power loot (re-rolled every run)                                          */
+/* ------------------------------------------------------------------------ */
+
+const SKILL_BY_BIOME: Record<Biome, string[]> = {
+  forest: ["arrow", "fireBolt", "ward"],
+  swamp: ["shadowBlade", "trap"],
+  graveyard: ["pulse"],
+};
+
+const MODS_BY_BIOME: Record<Biome, string[]> = {
+  forest: ["multishot", "homing", "piercing", "explosive"],
+  swamp: ["chain", "vampiric", "ricochet", "split"],
+  graveyard: ["supershot"],
+};
+
+function scatterInBiome(
+  r: () => number,
+  biome: Biome,
+  list: { x: number; z: number }[],
+  minDist: number,
+  attempts = 80,
+  arenaPad = 3
+): { x: number; z: number } | null {
+  for (let i = 0; i < attempts; i++) {
+    const x = (r() * 2 - 1) * (WORLD_HALF - 12);
+    const z = (r() * 2 - 1) * (WORLD_HALF - 12);
+    if (biomeAt(x, z) !== biome) continue;
+    if (nearSpawn(x, z) || nearGatePath(x, z)) continue;
+    if (nearBossArena(x, z, arenaPad)) continue;
+    if (tooCloseToHouse(x, z, 2.2)) continue;
+    if (tooClose(x, z, TREES, 1.4)) continue;
+    if (tooClose(x, z, TALISMANS, 4)) continue;
+    if (tooClose(x, z, list, minDist)) continue;
+    return { x, z };
+  }
+  return null;
+}
+
+const KEY_GAPS = [92, 76, 60, 46];
+
+function scatterKeyInBiome(
+  r: () => number,
+  biome: Biome,
+  occupied: { x: number; z: number }[],
+  siblingKeys: { x: number; z: number }[]
+): { x: number; z: number } | null {
+  for (const gap of KEY_GAPS) {
+    const p = scatterInBiome(r, biome, [...occupied, ...siblingKeys], gap, 240, 12);
+    if (p && !tooClose(p.x, p.z, siblingKeys, gap)) return p;
+  }
+  return scatterInBiome(r, biome, [...occupied, ...siblingKeys], 36, 200, 10);
+}
+
+/** Fragments, skill shards, modifiers, key pieces, and one cursed relic per later biome. */
+export function generatePowerLoot(seed: number): PowerLootPlacement[] {
+  const r = mulberry32(seed * 4133 + 91);
+  const list: PowerLootPlacement[] = [];
+  const occupied: { x: number; z: number }[] = [];
+  let n = 0;
+
+  const push = (item: Omit<PowerLootPlacement, "id">): void => {
+    const id = `loot-${n++}`;
+    list.push({ ...item, id });
+    occupied.push({ x: item.x, z: item.z });
+  };
+
+  const biomes: Biome[] = ["forest", "swamp", "graveyard"];
+  const fragmentCounts: Record<Biome, number> = { forest: 16, swamp: 14, graveyard: 10 };
+
+  for (const biome of biomes) {
+    const keysHere: { x: number; z: number }[] = [];
+    for (let k = 0; k < 3; k++) {
+      const p = scatterKeyInBiome(r, biome, occupied, keysHere);
+      if (!p) continue;
+      keysHere.push(p);
+      push({ kind: "keyPiece", x: p.x, z: p.z, biome, keyIndex: k });
+    }
+    for (let i = 0; i < fragmentCounts[biome]; i++) {
+      const p = scatterInBiome(r, biome, occupied, 18);
+      if (!p) continue;
+      push({ kind: "fragment", x: p.x, z: p.z, biome });
+    }
+    for (const skillId of SKILL_BY_BIOME[biome]) {
+      const p = scatterInBiome(r, biome, occupied, 22);
+      if (!p) continue;
+      push({ kind: "skillShard", x: p.x, z: p.z, biome, skillId });
+    }
+    for (const modifierId of MODS_BY_BIOME[biome]) {
+      const p = scatterInBiome(r, biome, occupied, 20);
+      if (!p) continue;
+      push({ kind: "modifier", x: p.x, z: p.z, biome, modifierId });
+    }
+  }
+
+  const cursedSpot = scatterInBiome(r, "swamp", occupied, 24);
+  if (cursedSpot) {
+    push({
+      kind: "cursedRelic",
+      x: cursedSpot.x,
+      z: cursedSpot.z,
+      biome: "swamp",
+      modifierId: "cursedSupershot",
+    });
+  }
+
   return list;
 }
 
@@ -609,6 +774,29 @@ export function excludeFromHouses(
     z = world.z;
   }
   return { x, z };
+}
+
+/** Keep the survivor outside a locked boss ring. */
+export function resolveLockedArenas(
+  x: number,
+  z: number,
+  bodyRadius: number,
+  unlocked: Record<string, boolean>
+): { x: number; z: number } {
+  let px = x;
+  let pz = z;
+  for (const arena of BOSS_ARENAS) {
+    if (unlocked[arena.bossId]) continue;
+    const dx = px - arena.x;
+    const dz = pz - arena.z;
+    const d = Math.hypot(dx, dz);
+    const limit = arena.radius + bodyRadius;
+    if (d > 0.001 && d < limit) {
+      px = arena.x + (dx / d) * limit;
+      pz = arena.z + (dz / d) * limit;
+    }
+  }
+  return { x: px, z: pz };
 }
 
 /** Push a point out of trees, house walls, and streetlight poles. */

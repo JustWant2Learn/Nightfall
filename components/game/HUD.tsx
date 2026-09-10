@@ -4,9 +4,11 @@ import { useEffect, useState } from "react";
 import {
   Droplets,
   Eye,
+  Flame,
   Gauge,
   Heart,
   Home,
+  KeyRound,
   MousePointerClick,
   Shield,
   Skull,
@@ -14,8 +16,10 @@ import {
   TreePine,
   Zap,
 } from "lucide-react";
+import { SkillBench } from "@/components/game/SkillBench";
 import { Progress } from "@/components/ui/progress";
-import { POWERUP_INFO, runtime, useGameStore } from "@/lib/store";
+import { BOSSES, SKILLS, nextBoss, type SkillId } from "@/lib/gameData";
+import { POWERUP_INFO, computePowerScore, runtime, useGameStore } from "@/lib/store";
 import { BIOME_INFO, type Biome } from "@/lib/world-data";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +35,17 @@ export function HUD() {
   const gateOpen = useGameStore((s) => s.gateOpen);
   const stats = useGameStore((s) => s.stats);
   const lastPickup = useGameStore((s) => s.lastPickup);
+  const lastPower = useGameStore((s) => s.lastPowerToast);
+  const fragments = useGameStore((s) => s.fragments);
+  const keys = useGameStore((s) => s.keys);
+  const unlockedSkills = useGameStore((s) => s.unlockedSkills);
+  const activeSkill = useGameStore((s) => s.activeSkill);
+  const skillLevels = useGameStore((s) => s.skillLevels);
+  const loadout = useGameStore((s) => s.loadout);
+  const bossesDefeated = useGameStore((s) => s.bossesDefeated);
+  const arenasOpened = useGameStore((s) => s.arenasOpened);
+  const skillMenuOpen = useGameStore((s) => s.skillMenuOpen);
+  const powerScore = useGameStore((s) => computePowerScore(s));
 
   const [health, setHealth] = useState(100);
   const [stamina, setStamina] = useState(100);
@@ -41,6 +56,15 @@ export function HUD() {
   const [paused, setPaused] = useState(true);
   const [biome, setBiome] = useState<Biome>("forest");
   const [expiredToastId, setExpiredToastId] = useState<number | null>(null);
+  const [expiredPower, setExpiredPower] = useState<string | null>(null);
+  const [corruption, setCorruption] = useState(0);
+  const [bossHp, setBossHp] = useState(0);
+  const [bossMax, setBossMax] = useState(0);
+  const [bossName, setBossName] = useState("");
+  const [armored, setArmored] = useState(false);
+  const [inFight, setInFight] = useState(false);
+  const [nearAltar, setNearAltar] = useState(false);
+  const [yaw, setYaw] = useState(0);
 
   // Sample the per-frame runtime values on a slow interval so the HUD
   // never forces the 3D loop to re-render React.
@@ -54,6 +78,14 @@ export function HUD() {
       setSafe(runtime.playerSafe);
       setPaused(runtime.paused);
       setBiome(runtime.biome);
+      setCorruption(runtime.corruption);
+      setBossHp(runtime.bossHealth);
+      setBossMax(runtime.bossMaxHealth);
+      setArmored(runtime.bossArmored);
+      setInFight(runtime.inArena && runtime.bossAlive);
+      setBossName(runtime.bossId ? BOSSES[runtime.bossId].name : "");
+      setNearAltar(runtime.nearAltarId !== null);
+      setYaw(runtime.camYaw);
     }, 100);
     return () => clearInterval(interval);
   }, []);
@@ -66,6 +98,19 @@ export function HUD() {
     return () => clearTimeout(timer);
   }, [lastPickup]);
   const toastVisible = lastPickup !== null && expiredToastId !== lastPickup.id;
+
+  useEffect(() => {
+    if (!lastPower) return;
+    const id = lastPower.id;
+    const timer = setTimeout(() => setExpiredPower(id), lastPower.linger ? 5600 : 2800);
+    return () => clearTimeout(timer);
+  }, [lastPower]);
+  const powerVisible = lastPower !== null && expiredPower !== lastPower.id;
+
+  const current = nextBoss(bossesDefeated);
+  const currentDef = current ? BOSSES[current] : null;
+  const keyBits = currentDef ? keys[currentDef.biome] : [false, false, false];
+  const portalOpen = current ? arenasOpened.includes(current) : false;
 
   const healthPct = (health / stats.maxHealth) * 100;
   const staminaPct = (stamina / stats.maxStamina) * 100;
@@ -114,21 +159,54 @@ export function HUD() {
         />
       )}
 
-      {/* Objective + talisman counter */}
+      {corruption > 8 && (
+        <div
+          className="absolute inset-0"
+          style={{
+            opacity: Math.min(0.55, corruption / 140),
+            background:
+              "radial-gradient(ellipse at center, transparent 40%, rgba(80,0,0,0.75) 100%)",
+            mixBlendMode: "multiply",
+          }}
+        />
+      )}
+
+      {/* Objective + power */}
       <div className="absolute top-4 left-4 flex flex-col gap-2">
         <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-black/55 px-3 py-2 backdrop-blur-sm">
           <Sparkles className="size-4 text-purple-400" />
           <span className="font-mono text-sm tracking-widest text-purple-100">
             {collected} / {total}
           </span>
+          <span className="text-[10px] tracking-widest text-white/40 uppercase">Talismans</span>
         </div>
-        <p className="max-w-55 text-xs text-white/60">
+        <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-black/55 px-3 py-2 backdrop-blur-sm">
+          <Zap className="size-4 text-amber-300" />
+          <span className="font-mono text-sm text-amber-100">
+            {powerScore}
+            {currentDef ? ` / ${currentDef.threshold}` : ""}
+          </span>
+          <span className="text-[10px] tracking-widest text-white/40 uppercase">Power</span>
+        </div>
+        <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-black/55 px-3 py-2 backdrop-blur-sm">
+          <KeyRound className="size-4 text-yellow-300" />
+          <span className="font-mono text-sm text-yellow-100">
+            {portalOpen ? "Open" : `${keyBits.filter(Boolean).length} / 3`}
+          </span>
+          <span className="text-[10px] tracking-widest text-white/40 uppercase">
+            {portalOpen ? "Portal" : currentDef ? `${currentDef.biome} keys` : "Keys"}
+          </span>
+        </div>
+        <p className="max-w-64 text-xs text-white/60">
           {gateOpen ? (
-            <span className="font-semibold text-sky-300">
-              The gate is open. Run north — escape!
-            </span>
+            <span className="font-semibold text-sky-300">The north gate is open. Run.</span>
+          ) : currentDef ? (
+            <>
+              Hunt {currentDef.name} in the {BIOME_INFO[currentDef.biome].name}. Three keys and Power{" "}
+              {currentDef.threshold} open its portal. Tab opens the skill bench.
+            </>
           ) : (
-            "Walk south into the open cabin if you need a safe house. Collect talismans to unseal the gate."
+            "The Hollow One is down. The gate waits north."
           )}
         </p>
       </div>
@@ -161,6 +239,37 @@ export function HUD() {
           </span>
         </div>
       ) : null}
+
+      {inFight && (
+        <div className="absolute top-16 left-1/2 w-80 -translate-x-1/2">
+          <p className="mb-1 text-center text-[11px] font-bold tracking-[0.25em] text-red-200 uppercase">
+            {bossName}
+            {armored ? " — armored" : ""}
+          </p>
+          <Progress
+            value={bossMax > 0 ? (bossHp / bossMax) * 100 : 0}
+            className="h-2.5 bg-white/10"
+            indicatorClassName={armored ? "bg-zinc-400" : "bg-red-500"}
+          />
+        </div>
+      )}
+
+      {lastPower && (
+        <div
+          key={lastPower.id}
+          className={cn(
+            "absolute top-[22%] left-1/2 -translate-x-1/2 rounded-xl border bg-black/75 px-5 py-3 text-center backdrop-blur-md transition-opacity duration-500",
+            lastPower.linger ? "max-w-md px-7 py-4" : "",
+            powerVisible ? "opacity-100 animate-in fade-in zoom-in-95" : "opacity-0"
+          )}
+          style={{ borderColor: `${lastPower.color}80` }}
+        >
+          <p className="text-sm font-bold tracking-[0.18em] uppercase" style={{ color: lastPower.color }}>
+            {lastPower.title}
+          </p>
+          <p className="text-xs text-white/60">{lastPower.detail}</p>
+        </div>
+      )}
 
       {/* Powerup toast */}
       {lastPickup && (
@@ -219,28 +328,125 @@ export function HUD() {
           }
         />
 
+        <div className="mt-2.5 mb-1 flex items-center justify-between text-white/70">
+          <span className="flex items-center gap-1.5">
+            <Flame className="size-3.5 text-red-400" />
+            <span className="text-[11px] font-medium tracking-widest uppercase">Corruption</span>
+          </span>
+          <span className="font-mono text-[11px] text-white/60">{Math.floor(corruption)}</span>
+        </div>
+        <Progress
+          value={corruption}
+          className="h-1.5 bg-white/10"
+          indicatorClassName={corruption >= 50 ? "bg-red-600" : "bg-rose-800"}
+        />
+
         <div className="mt-3 flex items-center justify-center gap-2">
           <StatChip icon={<Gauge className="size-3.5" />} label="Speed" value={`×${stats.speed.toFixed(2)}`} color={POWERUP_INFO.speed.color} />
           <StatChip icon={<Shield className="size-3.5" />} label="Armor" value={`${stats.armor}%`} color={POWERUP_INFO.armor.color} />
+          <StatChip icon={<Sparkles className="size-3.5" />} label="Frags" value={`${fragments}`} color="#e8dcc0" />
         </div>
+
+        <div className="pointer-events-none mt-3 flex justify-center gap-1.5">
+          {unlockedSkills.map((id, i) => (
+            <SkillChip key={id} id={id} index={i} active={id === activeSkill} level={skillLevels[id] ?? 1} slotted={loadout[id]?.length ?? 0} />
+          ))}
+        </div>
+        {nearAltar && (
+          <p className="mt-2 text-center text-[11px] text-violet-200">F — fuse at the shrine</p>
+        )}
+        <p className="mt-1 text-center text-[10px] tracking-widest text-white/35 uppercase">Tab — skill bench</p>
       </div>
+
+      <Compass yaw={yaw} />
 
       {/* Click-to-play prompt (also acts as pause). Keep it light so the
           forest stays visible underneath — a heavy veil looked like a crash. */}
-      {paused && (
+      {paused && !skillMenuOpen && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/25">
           <div className="flex flex-col items-center gap-3 rounded-xl border bg-card/90 px-8 py-6 text-center backdrop-blur">
             <MousePointerClick className="size-8 text-primary" />
             <p className="text-lg font-semibold">Click to enter the forest</p>
             <p className="text-xs text-muted-foreground">
-              WASD — move · Space — jump · Shift — sprint · Mouse — look · Esc — pause
+              WASD — move · Space — jump · Shift — sprint · Click — skill · 1-6 — swap · Tab — skills
             </p>
             <p className="text-[11px] text-muted-foreground/80">
-              Glowing pickups raise your stats. Three biomes, three kinds of safe house.
+              Gather fragments, shards, and key pieces. Three keys open a boss portal when your Power is high enough.
             </p>
           </div>
         </div>
       )}
+
+      {skillMenuOpen && <SkillBench />}
+    </div>
+  );
+}
+
+/** World north is −Z (the escape gate). Letters orbit; the red tick is look direction. */
+function Compass({ yaw }: { yaw: number }) {
+  const marks = [
+    { label: "N", angle: 0, color: "#ff5a5a" },
+    { label: "E", angle: 90, color: "#e8e4d8" },
+    { label: "S", angle: 180, color: "#e8e4d8" },
+    { label: "W", angle: 270, color: "#e8e4d8" },
+  ];
+  const radius = 28;
+  return (
+    <div className="absolute right-5 bottom-6 flex flex-col items-center gap-1">
+      <div className="relative size-20 rounded-full border border-white/20 bg-black/60 shadow-[0_0_20px_rgba(0,0,0,0.55)] backdrop-blur-sm">
+        {marks.map((m) => {
+          const rad = (m.angle * Math.PI) / 180 - yaw;
+          const x = Math.sin(rad) * radius;
+          const y = -Math.cos(rad) * radius;
+          return (
+            <span
+              key={m.label}
+              className="absolute top-1/2 left-1/2 text-[10px] font-bold tracking-widest"
+              style={{
+                color: m.color,
+                transform: `translate(-50%, -50%) translate(${x}px, ${y}px)`,
+              }}
+            >
+              {m.label}
+            </span>
+          );
+        })}
+        <div className="absolute top-1/2 left-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/40 bg-white/15" />
+        <div className="absolute top-2 left-1/2 h-5 w-0.5 -translate-x-1/2 rounded-full bg-red-400" />
+        <div className="absolute top-[38px] left-1/2 h-3.5 w-0.5 -translate-x-1/2 rounded-full bg-white/35" />
+      </div>
+      <span className="text-[9px] tracking-[0.25em] text-white/40 uppercase">North</span>
+    </div>
+  );
+}
+
+function SkillChip({
+  id,
+  index,
+  active,
+  level,
+  slotted,
+}: {
+  id: SkillId;
+  index: number;
+  active: boolean;
+  level: number;
+  slotted: number;
+}) {
+  const def = SKILLS[id];
+  return (
+    <div
+      className={cn(
+        "flex h-11 w-11 flex-col items-center justify-center rounded-md border bg-black/60",
+        active ? "border-white/70" : "border-border/50"
+      )}
+      style={{ boxShadow: active ? `0 0 10px ${def.glow}` : undefined }}
+    >
+      <span className="text-[9px] font-bold tracking-widest" style={{ color: def.color }}>
+        {index + 1}
+      </span>
+      <span className="text-[8px] text-white/70">{def.name.split(" ")[0]}</span>
+      <span className="text-[8px] text-white/40">L{level}{slotted ? `·${slotted}` : ""}</span>
     </div>
   );
 }

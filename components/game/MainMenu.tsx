@@ -65,8 +65,10 @@ export function MainMenu() {
             NIGHTFALL
           </h1>
           <p className="mt-4 text-sm text-white/50">
-            Something hunts you in the dead forest. Find all {total} talismans,
-            hide in houses when it closes in, unseal the gate, and escape.
+            Three biomes. Three bosses. Scavenge fragments and key pieces,
+            combine skills at the shrines, then kill the Rotting Bear, the Ogre,
+            and the Hollow One before the north gate will open. {total} talismans
+            still feed your Power.
           </p>
         </div>
 
@@ -110,7 +112,7 @@ export function MainMenu() {
             <Home className="size-3.5" /> Houses are safe zones
           </span>
           <span className="flex items-center gap-1.5">
-            <Sparkles className="size-3.5" /> Walk into talismans to collect
+            <Sparkles className="size-3.5" /> Click to fire · Tab for the skill bench
           </span>
           <span className="flex items-center gap-1.5">
             <Shield className="size-3.5" /> Glowing pickups raise your stats
