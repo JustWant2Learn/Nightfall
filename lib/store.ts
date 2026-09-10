@@ -560,8 +560,31 @@ export const runtime = {
   monsterDistance: 999,
   /** True until the player clicks into the forest (or after Esc). */
   paused: true,
-  /** True once pointer lock has succeeded at least once this session. */
-  hadPointerLock: false,
+  /** True once the player has focused the forest at least once this session. */
+  hadFocus: false,
+  /** Holding RMB — Valheim-style free look. */
+  looking: false,
+  /** Cursor NDC for aiming (−1…1). */
+  aimNdcX: 0,
+  aimNdcY: 0,
+  /** Screen-pixel cursor for the HUD reticle. */
+  cursorX: 0,
+  cursorY: 0,
+  /** Unit direction of the camera ray through the reticle. */
+  aimDirX: 0,
+  aimDirY: 0,
+  aimDirZ: -1,
+  /** Spawn point on that ray (near the survivor) so shots pass through the reticle. */
+  muzzleX: 0,
+  muzzleY: 0.72,
+  muzzleZ: 0,
+  /** World yaw for body facing (horizontal component of aim). */
+  aimYaw: 0,
+  /** World point the reticle is aiming at (full 3D). */
+  aimX: 0,
+  aimY: 0.72,
+  aimZ: -1,
+  flashlightOn: true,
   fireHeld: false,
   fireClicked: false,
   charge: 0,
@@ -594,7 +617,23 @@ export function resetRuntime(stats: Stats = BASE_STATS.girl): void {
   runtime.monsterMood = "stalk";
   runtime.monsterDistance = 999;
   runtime.paused = true;
-  runtime.hadPointerLock = false;
+  runtime.hadFocus = false;
+  runtime.looking = false;
+  runtime.aimNdcX = 0;
+  runtime.aimNdcY = 0;
+  runtime.cursorX = 0;
+  runtime.cursorY = 0;
+  runtime.aimDirX = 0;
+  runtime.aimDirY = 0;
+  runtime.aimDirZ = -1;
+  runtime.muzzleX = 0;
+  runtime.muzzleY = 0.72;
+  runtime.muzzleZ = 0;
+  runtime.aimYaw = 0;
+  runtime.aimX = 0;
+  runtime.aimY = 0.72;
+  runtime.aimZ = -1;
+  runtime.flashlightOn = true;
   runtime.fireHeld = false;
   runtime.fireClicked = false;
   runtime.charge = 0;

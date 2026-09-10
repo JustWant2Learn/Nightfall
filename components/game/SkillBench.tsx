@@ -55,7 +55,8 @@ export function SkillBench() {
 
   return (
     <div
-      className="pointer-events-auto absolute inset-0 z-30 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm"
+      className="pointer-events-auto absolute inset-0 z-30 flex cursor-auto items-center justify-center bg-black/55 p-4 backdrop-blur-sm"
+      data-ui-block
       onClick={() => setSkillMenuOpen(false)}
     >
       <Card

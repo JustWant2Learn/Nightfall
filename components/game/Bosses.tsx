@@ -109,7 +109,7 @@ function Boss({ id }: { id: BossId }) {
           if (runtime.health <= 0) {
             store.die();
             audio.death();
-            if (document.pointerLockElement) document.exitPointerLock();
+            runtime.paused = true;
           } else {
             audio.hurt();
           }

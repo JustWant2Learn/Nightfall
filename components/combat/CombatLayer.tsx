@@ -87,7 +87,7 @@ export function CombatLayer() {
       runtime.charge = Math.min(1, runtime.charge + dt / 1.05);
     }
 
-    const heading = runtime.camYaw;
+    const heading = runtime.aimYaw;
     let fired = false;
     if (canCharge) {
       if (!runtime.fireHeld && runtime.charge > 0.12) {
@@ -110,7 +110,7 @@ export function CombatLayer() {
     writeInstances(arrows.current, arrowN, (i, obj, color) => {
       const b = spearAt(i);
       obj.position.set(b.x, b.y, b.z);
-      FORWARD.set(b.vx, 0, b.vz);
+      FORWARD.set(b.vx, b.vy, b.vz);
       if (FORWARD.lengthSq() > 0.001) {
         obj.quaternion.setFromUnitVectors(CAPSULE_AXIS, FORWARD.normalize());
         obj.quaternion.multiply(BLADE_ROLL);
@@ -122,7 +122,7 @@ export function CombatLayer() {
     writeInstances(bolts.current, boltN, (i, obj, color) => {
       const b = emberAt(i);
       obj.position.set(b.x, b.y, b.z);
-      FORWARD.set(b.vx, 0, b.vz);
+      FORWARD.set(b.vx, b.vy, b.vz);
       if (FORWARD.lengthSq() > 0.001) {
         obj.quaternion.setFromUnitVectors(CAPSULE_AXIS, FORWARD.normalize());
       }

@@ -49,7 +49,7 @@ export function Player({ character }: { character: Character }) {
   const root = useRef<THREE.Group>(null);
   const model = useRef<THREE.Group>(null);
   const speedRef = useRef(0);
-  const heading = useRef(Math.PI);
+  const heading = useRef(0);
   const keys = useRef<Set<string>>(new Set());
   const flashlight = useRef<THREE.SpotLight>(null);
   const flashTarget = useRef<THREE.Object3D>(null);
@@ -61,6 +61,10 @@ export function Player({ character }: { character: Character }) {
   const looted = useRef<Set<string>>(new Set());
   const fused = useRef<Set<string>>(new Set());
   const enteredArena = useRef<Set<string>>(new Set());
+  const aimRay = useRef(new THREE.Raycaster());
+  const aimHit = useRef(new THREE.Vector3());
+  const aimDir = useRef(new THREE.Vector3());
+  const aimNdc = useRef(new THREE.Vector2());
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -70,7 +74,8 @@ export function Player({ character }: { character: Character }) {
         const next = !store.skillMenuOpen;
         store.setSkillMenuOpen(next);
         keys.current.clear();
-        if (next && document.pointerLockElement) document.exitPointerLock();
+        runtime.looking = false;
+        runtime.fireHeld = false;
         return;
       }
       if (e.code === "Escape" && store.skillMenuOpen) {
@@ -94,6 +99,7 @@ export function Player({ character }: { character: Character }) {
       if (e.code === "KeyE") runtime.fireClicked = true;
       if (e.code === "KeyR") store.levelSkill(store.activeSkill);
       if (e.code === "KeyT") cycleModifier(store.activeSkill);
+      if (e.code === "KeyV") runtime.flashlightOn = !runtime.flashlightOn;
       if (e.code === "KeyF") {
         const altar = nearAltar(runtime.playerX, runtime.playerZ);
         if (altar && !fused.current.has(altar.id) && store.fuseAtAltar()) {
@@ -127,6 +133,53 @@ export function Player({ character }: { character: Character }) {
     const dt = Math.min(delta, 0.05);
     const k = keys.current;
 
+    // Aim: always the camera ray through the reticle NDC (including while RMB-looking).
+    // Projectiles spawn on that ray so they travel through the exact point under the crosshair.
+    const AIM_RANGE = 56;
+    const groundY = group.position.y;
+    aimNdc.current.set(runtime.aimNdcX, runtime.aimNdcY);
+    aimRay.current.setFromCamera(aimNdc.current, state.camera);
+    const ray = aimRay.current.ray;
+    aimDir.current.copy(ray.direction).normalize();
+
+    runtime.aimDirX = aimDir.current.x;
+    runtime.aimDirY = aimDir.current.y;
+    runtime.aimDirZ = aimDir.current.z;
+
+    // Muzzle = closest point on the aim ray that's still in front of the camera / near the hands.
+    const handX = group.position.x;
+    const handY = group.position.y + 0.72;
+    const handZ = group.position.z;
+    const toHandX = handX - ray.origin.x;
+    const toHandY = handY - ray.origin.y;
+    const toHandZ = handZ - ray.origin.z;
+    const along = Math.max(
+      1.15,
+      toHandX * aimDir.current.x + toHandY * aimDir.current.y + toHandZ * aimDir.current.z
+    );
+    runtime.muzzleX = ray.origin.x + aimDir.current.x * along;
+    runtime.muzzleY = ray.origin.y + aimDir.current.y * along;
+    runtime.muzzleZ = ray.origin.z + aimDir.current.z * along;
+
+    // Far aim point (or ground) for UI / facing — shots still use aimDir, not player→point.
+    aimHit.current.copy(ray.origin).addScaledVector(aimDir.current, AIM_RANGE);
+    if (aimDir.current.y < -0.02) {
+      const t = (groundY - ray.origin.y) / aimDir.current.y;
+      if (t > along + 0.5 && t < AIM_RANGE) {
+        aimHit.current.copy(ray.origin).addScaledVector(aimDir.current, t);
+      }
+    }
+    runtime.aimX = aimHit.current.x;
+    runtime.aimY = aimHit.current.y;
+    runtime.aimZ = aimHit.current.z;
+
+    const flat = Math.hypot(aimDir.current.x, aimDir.current.z);
+    if (flat > 0.001) {
+      runtime.aimYaw = Math.atan2(-aimDir.current.x, -aimDir.current.z);
+    } else {
+      runtime.aimYaw = runtime.camYaw;
+    }
+
     let move = new THREE.Vector2(0, 0);
     if (!paused) {
       const forwardInput =
@@ -146,6 +199,7 @@ export function Player({ character }: { character: Character }) {
     const moving = move.lengthSq() > 0.001;
     const wantsSprint = k.has("ShiftLeft") || k.has("ShiftRight");
     const sprinting = moving && wantsSprint && runtime.stamina > 1 && grounded.current;
+    const attacking = runtime.fireHeld || runtime.fireClicked;
 
     // Bigger stamina pools also refill a little faster.
     const regen = 12 * (0.7 + (stats.maxStamina / 100) * 0.3);
@@ -182,10 +236,19 @@ export function Player({ character }: { character: Character }) {
       const gated = resolveLockedArenas(resolved.x, resolved.z, 0.35, unlocked);
       nx = THREE.MathUtils.clamp(gated.x, -(WORLD_HALF - 2), WORLD_HALF - 2);
       nz = THREE.MathUtils.clamp(gated.z, -(WORLD_HALF - 2), WORLD_HALF - 2);
+    }
 
-      const targetHeading = Math.atan2(move.x, move.y);
-      heading.current = lerpAngle(heading.current, targetHeading, 1 - Math.exp(-12 * dt));
-      if (model.current) model.current.rotation.y = heading.current;
+    if (!paused) {
+      // Face the reticle while firing; otherwise face move direction, or camera when idle.
+      let faceYaw = runtime.camYaw;
+      if (attacking) faceYaw = runtime.aimYaw;
+      else if (moving) faceYaw = Math.atan2(-move.x, -move.y);
+      const turn = attacking ? 14 : moving ? 12 : 5;
+      heading.current = lerpAngle(heading.current, faceYaw, 1 - Math.exp(-turn * dt));
+    }
+    if (model.current) {
+      // Mesh / flashlight face local +Z; combat yaw 0 fires toward world −Z.
+      model.current.rotation.y = heading.current + Math.PI;
     }
 
     // House floors and porches are raised, so the "ground" follows them.
@@ -276,7 +339,7 @@ export function Player({ character }: { character: Character }) {
       if (dx * dx + dz * dz < 2.6 * 2.6) {
         store.win();
         audio.win();
-        if (document.pointerLockElement) document.exitPointerLock();
+        runtime.paused = true;
       }
     }
 
@@ -295,48 +358,81 @@ export function Player({ character }: { character: Character }) {
     const camZ = group.position.z + Math.cos(yaw) * dist * cosPitch;
     state.camera.position.set(camX, camY, camZ);
     state.camera.lookAt(group.position.x, group.position.y + (indoors ? 0.95 : 1.05), group.position.z);
+
+    // Flashlight: warm spot only — no volume mesh. Toggle with V.
+    const torch = flashlight.current;
+    if (torch) {
+      const on = runtime.flashlightOn && !paused;
+      const flicker = on ? 1 + Math.sin(state.clock.elapsedTime * 17.3) * 0.04 + Math.sin(state.clock.elapsedTime * 41) * 0.025 : 0;
+      torch.intensity = on ? 640 * flicker : 0;
+      torch.visible = on;
+    }
   });
 
   return (
     <group ref={root}>
-      <group ref={model} rotation={[0, Math.PI, 0]}>
+      <group ref={model}>
         <CharacterModel character={character} speedRef={speedRef} />
-        {/* Flashlight held at the child's hand height, with a visible volume cone. */}
         <spotLight
           ref={flashlight}
-          position={[0.17, 0.62, 0.22]}
-          angle={0.78}
-          penumbra={0.28}
-          intensity={360}
-          distance={38}
-          decay={1.1}
-          color="#fff1c4"
+          position={[0.18, 0.68, 0.28]}
+          angle={0.62}
+          penumbra={0.48}
+          intensity={640}
+          distance={62}
+          decay={1.2}
+          color="#ffe7b8"
+          castShadow={false}
         />
-        <object3D ref={flashTarget} position={[0, 0.45, 14]} />
-        <mesh position={[0.17, 0.6, 0.16]} rotation={[Math.PI / 2, 0, 0]}>
-          <cylinderGeometry args={[0.03, 0.026, 0.16, 10]} />
-          <meshStandardMaterial color="#2a2a2e" roughness={0.5} metalness={0.5} />
+        <object3D ref={flashTarget} position={[0, 0.2, 28]} />
+        <mesh position={[0.18, 0.66, 0.2]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.032, 0.028, 0.18, 10]} />
+          <meshStandardMaterial color="#1c1c20" roughness={0.45} metalness={0.65} />
         </mesh>
-        <mesh position={[0.17, 0.58, 5.1]} rotation={[Math.PI / 2 - 0.02, 0, 0]}>
-          <coneGeometry args={[3.6, 10.5, 18, 1, true]} />
-          <meshBasicMaterial
-            color="#ffe7b0"
-            transparent
-            opacity={0.11}
-            side={THREE.DoubleSide}
-            depthWrite={false}
-          />
-        </mesh>
-        <pointLight
-          position={[0, 1.0, 2.4]}
-          intensity={18}
-          distance={14}
-          decay={1.4}
-          color="#ffe6b0"
-        />
+        <FlashlightGlow />
       </group>
-      {/* Faint personal glow so the survivor is always readable. */}
-      <pointLight position={[0, 1.4, 0]} intensity={4.5} distance={8} decay={2} color="#c8d4ea" />
+      <pointLight position={[0, 1.4, 0]} intensity={2.2} distance={5.5} decay={2} color="#b8c4dc" />
     </group>
+  );
+}
+
+function FlashlightGlow() {
+  const fill = useRef<THREE.PointLight>(null);
+  const lens = useRef<THREE.MeshStandardMaterial>(null);
+
+  useFrame((state) => {
+    const on = runtime.flashlightOn && !runtime.paused;
+    const flicker = on
+      ? 1 + Math.sin(state.clock.elapsedTime * 17.3) * 0.05 + Math.sin(state.clock.elapsedTime * 41) * 0.03
+      : 0;
+    if (fill.current) {
+      fill.current.intensity = on ? 14 * flicker : 0;
+      fill.current.visible = on;
+    }
+    if (lens.current) lens.current.emissiveIntensity = on ? 1.6 * flicker : 0.04;
+  });
+
+  return (
+    <>
+      {/* Soft fill only in front of the lens — no translucent cone / dome mesh. */}
+      <pointLight
+        ref={fill}
+        position={[0.12, 0.55, 2.4]}
+        intensity={14}
+        distance={12}
+        decay={1.8}
+        color="#ffe6b0"
+      />
+      <mesh position={[0.18, 0.66, 0.3]}>
+        <sphereGeometry args={[0.03, 10, 8]} />
+        <meshStandardMaterial
+          ref={lens}
+          color="#fff6d8"
+          emissive="#ffc56a"
+          emissiveIntensity={1.4}
+          roughness={0.25}
+        />
+      </mesh>
+    </>
   );
 }

@@ -20,6 +20,7 @@ import { BIOME_INFO } from "@/lib/world-data";
 
 const PITCH_MIN = 0.08;
 const PITCH_MAX = 1.15;
+const LOOK_SENS = 0.0032;
 const CANVAS_GL = {
   antialias: true,
   alpha: false,
@@ -71,83 +72,107 @@ function BiomeAtmosphere() {
   return null;
 }
 
+function uiBlocksPointer(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest("[data-ui-block]"));
+}
+
 export function GameCanvas({ character }: { character: Character }) {
   const wrapper = useRef<HTMLDivElement>(null);
-  const unlockedAt = useRef(0);
 
   useEffect(() => {
+    const el = wrapper.current;
+    if (!el) return;
+
+    const syncCursor = (clientX: number, clientY: number) => {
+      const rect = el.getBoundingClientRect();
+      const x = clientX - rect.left;
+      const y = clientY - rect.top;
+      runtime.cursorX = x;
+      runtime.cursorY = y;
+      const w = Math.max(1, rect.width);
+      const h = Math.max(1, rect.height);
+      runtime.aimNdcX = (x / w) * 2 - 1;
+      runtime.aimNdcY = -((y / h) * 2 - 1);
+    };
+
     const onMouseMove = (e: MouseEvent) => {
-      if (!document.pointerLockElement) return;
-      runtime.camYaw -= e.movementX * 0.0026;
-      runtime.camPitch = Math.min(
-        PITCH_MAX,
-        Math.max(PITCH_MIN, runtime.camPitch + e.movementY * 0.002)
-      );
-    };
-    const onLockChange = () => {
-      if (document.pointerLockElement) {
-        runtime.hadPointerLock = true;
-        runtime.paused = false;
+      if (runtime.looking && !runtime.paused) {
+        runtime.camYaw -= e.movementX * LOOK_SENS;
+        runtime.camPitch = Math.min(
+          PITCH_MAX,
+          Math.max(PITCH_MIN, runtime.camPitch + e.movementY * LOOK_SENS * 0.85)
+        );
         return;
       }
-      if (useGameStore.getState().skillMenuOpen) {
-        runtime.paused = true;
-        unlockedAt.current = 0;
-        return;
-      }
-      unlockedAt.current = performance.now();
-      if (runtime.hadPointerLock) {
-        runtime.paused = true;
-      }
+      syncCursor(e.clientX, e.clientY);
     };
-    const onLockError = (event: Event) => {
-      event.preventDefault();
-      event.stopPropagation();
-    };
+
     const onMouseDown = (e: MouseEvent) => {
-      if (!document.pointerLockElement || e.button !== 0) return;
-      runtime.fireHeld = true;
-      runtime.fireClicked = true;
+      if (uiBlocksPointer(e.target) || useGameStore.getState().skillMenuOpen) return;
+      if (runtime.paused) {
+        if (e.button === 0) {
+          runtime.paused = false;
+          runtime.hadFocus = true;
+        }
+        return;
+      }
+      if (e.button === 2) {
+        e.preventDefault();
+        runtime.looking = true;
+        return;
+      }
+      if (e.button === 0) {
+        runtime.fireHeld = true;
+        runtime.fireClicked = true;
+      }
     };
+
     const onMouseUp = (e: MouseEvent) => {
-      if (e.button !== 0) return;
+      if (e.button === 2) runtime.looking = false;
+      if (e.button === 0) runtime.fireHeld = false;
+    };
+
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+    };
+
+    const onBlur = () => {
+      runtime.looking = false;
       runtime.fireHeld = false;
     };
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("mousedown", onMouseDown);
-    document.addEventListener("mouseup", onMouseUp);
-    document.addEventListener("pointerlockchange", onLockChange);
-    document.addEventListener("pointerlockerror", onLockError);
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code !== "Escape") return;
+      if (useGameStore.getState().skillMenuOpen) return;
+      if (!runtime.paused && runtime.hadFocus) {
+        runtime.paused = true;
+        runtime.looking = false;
+        runtime.fireHeld = false;
+      }
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mouseup", onMouseUp);
+    window.addEventListener("blur", onBlur);
+    window.addEventListener("keydown", onKeyDown);
+    el.addEventListener("contextmenu", onContextMenu);
     return () => {
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mousedown", onMouseDown);
-      document.removeEventListener("mouseup", onMouseUp);
-      document.removeEventListener("pointerlockchange", onLockChange);
-      document.removeEventListener("pointerlockerror", onLockError);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("mouseup", onMouseUp);
+      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("keydown", onKeyDown);
+      el.removeEventListener("contextmenu", onContextMenu);
     };
   }, []);
 
-  const enterForest = () => {
-    if (useGameStore.getState().skillMenuOpen) return;
-    runtime.paused = false;
-    if (document.pointerLockElement) return;
-    if (performance.now() - unlockedAt.current < 1300) return;
-    const canvas = wrapper.current?.querySelector("canvas");
-    if (!canvas) return;
-    try {
-      const pending = canvas.requestPointerLock();
-      if (pending && typeof pending.catch === "function") {
-        pending.catch(() => {
-          unlockedAt.current = performance.now();
-        });
-      }
-    } catch {
-      unlockedAt.current = performance.now();
-    }
-  };
-
   return (
-    <div ref={wrapper} className="absolute inset-0 bg-[#0a101c]" onClick={enterForest}>
+    <div
+      ref={wrapper}
+      className="absolute inset-0 bg-[#0a101c]"
+      style={{ cursor: "none" }}
+    >
       <Canvas
         shadows
         dpr={[1, 1.25]}

@@ -106,13 +106,13 @@ export function MainMenu() {
             <Zap className="size-3.5" /> Shift to sprint
           </span>
           <span className="flex items-center gap-1.5">
-            <MousePointer2 className="size-3.5" /> Mouse to look
+            <MousePointer2 className="size-3.5" /> Hold RMB to look · aim with the free cursor
           </span>
           <span className="flex items-center gap-1.5">
             <Home className="size-3.5" /> Houses are safe zones
           </span>
           <span className="flex items-center gap-1.5">
-            <Sparkles className="size-3.5" /> Click to fire · Tab for the skill bench
+            <Sparkles className="size-3.5" /> LMB to fire · V for flashlight · Tab for skills
           </span>
           <span className="flex items-center gap-1.5">
             <Shield className="size-3.5" /> Glowing pickups raise your stats

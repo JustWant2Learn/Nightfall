@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Droplets,
   Eye,
@@ -355,29 +355,87 @@ export function HUD() {
         {nearAltar && (
           <p className="mt-2 text-center text-[11px] text-violet-200">F — fuse at the shrine</p>
         )}
-        <p className="mt-1 text-center text-[10px] tracking-widest text-white/35 uppercase">Tab — skill bench</p>
+        <p className="mt-1 text-center text-[10px] tracking-widest text-white/35 uppercase">
+          Tab — skills · V — light · RMB — look
+        </p>
       </div>
 
       <Compass yaw={yaw} />
 
-      {/* Click-to-play prompt (also acts as pause). Keep it light so the
-          forest stays visible underneath — a heavy veil looked like a crash. */}
+      {!paused && !skillMenuOpen && <AimCursor />}
+
       {paused && !skillMenuOpen && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/25">
-          <div className="flex flex-col items-center gap-3 rounded-xl border bg-card/90 px-8 py-6 text-center backdrop-blur">
+          <div className="pointer-events-auto flex flex-col items-center gap-3 rounded-xl border bg-card/90 px-8 py-6 text-center backdrop-blur">
             <MousePointerClick className="size-8 text-primary" />
             <p className="text-lg font-semibold">Click to enter the forest</p>
             <p className="text-xs text-muted-foreground">
-              WASD — move · Space — jump · Shift — sprint · Click — skill · 1-6 — swap · Tab — skills
+              WASD — move · Hold RMB — look · LMB — aim &amp; fire · V — flashlight · Tab — skills
             </p>
             <p className="text-[11px] text-muted-foreground/80">
-              Gather fragments, shards, and key pieces. Three keys open a boss portal when your Power is high enough.
+              Aim with the free cursor. Esc pauses. Three keys open a boss portal when Power is high enough.
             </p>
           </div>
         </div>
       )}
 
       {skillMenuOpen && <SkillBench />}
+    </div>
+  );
+}
+
+/** Bone-needle reticle — follows the mouse immediately (no React / 100ms HUD lag). */
+function AimCursor() {
+  const root = useRef<HTMLDivElement>(null);
+  const dot = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    const paint = () => {
+      const el = root.current;
+      if (!el) return;
+      const looking = runtime.looking;
+      el.style.transform = `translate3d(${runtime.cursorX}px, ${runtime.cursorY}px, 0) translate(-50%, -50%)`;
+      el.style.opacity = looking ? "0.45" : "1";
+      if (dot.current) {
+        dot.current.style.background = looking ? "#9ab0c8" : "#ffc56a";
+        dot.current.style.boxShadow = looking
+          ? "0 0 6px rgba(150,180,210,0.45)"
+          : "0 0 10px rgba(255,180,80,0.7)";
+      }
+    };
+
+    // Mouse events keep the reticle 1:1 with the OS cursor; rAF covers RMB-look opacity.
+    window.addEventListener("mousemove", paint, { passive: true });
+    let frame = 0;
+    const tick = () => {
+      paint();
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => {
+      window.removeEventListener("mousemove", paint);
+      cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  return (
+    <div
+      ref={root}
+      className="pointer-events-none absolute top-0 left-0 z-40 will-change-transform"
+      style={{ transform: "translate3d(-100px, -100px, 0) translate(-50%, -50%)" }}
+    >
+      <div className="relative size-9">
+        <span className="absolute top-0 left-1/2 h-2.5 w-px -translate-x-1/2 bg-[#e8dcc0]" />
+        <span className="absolute bottom-0 left-1/2 h-2.5 w-px -translate-x-1/2 bg-[#e8dcc0]" />
+        <span className="absolute top-1/2 left-0 h-px w-2.5 -translate-y-1/2 bg-[#e8dcc0]" />
+        <span className="absolute top-1/2 right-0 h-px w-2.5 -translate-y-1/2 bg-[#e8dcc0]" />
+        <span
+          ref={dot}
+          className="absolute top-1/2 left-1/2 size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#ffc56a]"
+          style={{ boxShadow: "0 0 10px rgba(255,180,80,0.7)" }}
+        />
+        <span className="absolute inset-0 rounded-full border border-[#e8dcc0]/40" />
+      </div>
     </div>
   );
 }
