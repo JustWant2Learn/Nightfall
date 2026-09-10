@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, type RefObject } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { audio } from "@/lib/audio";
+import { applyPlayerDamage } from "@/lib/combat";
 import { useBarkTexture, useFoliageTexture } from "@/lib/proc-textures";
 import { runtime, useGameStore } from "@/lib/store";
 import { MONSTER_SPAWN, WORLD_HALF, excludeFromHouses } from "@/lib/world-data";
@@ -144,10 +145,7 @@ export function Monster() {
 
           if (dist < STRIKE_RANGE && t > nextStrikeAt.current) {
             nextStrikeAt.current = t + STRIKE_INTERVAL;
-            const armor = store.stats.armor;
-            const damage = STRIKE_DAMAGE * (1 - armor / 100);
-            runtime.health = Math.max(0, runtime.health - damage);
-            runtime.hitFlash = 1;
+            applyPlayerDamage(STRIKE_DAMAGE);
             if (runtime.health <= 0) {
               store.die();
               audio.death();

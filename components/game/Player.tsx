@@ -91,6 +91,7 @@ export function Player({ character }: { character: Character }) {
         Digit4: 3,
         Digit5: 4,
         Digit6: 5,
+        Digit7: 6,
       };
       if (e.code in skillKeys) {
         const skill = store.unlockedSkills[skillKeys[e.code]];
@@ -244,6 +245,7 @@ export function Player({ character }: { character: Character }) {
     group.position.set(nx, nextY, nz);
 
     runtime.playerX = nx;
+    runtime.playerY = nextY;
     runtime.playerZ = nz;
     runtime.playerSafe = safe;
     runtime.biome = biomeAt(nx, nz);

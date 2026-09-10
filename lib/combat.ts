@@ -54,6 +54,8 @@ export interface Burst {
   age: number;
   color: string;
   size: number;
+  /** Ground ring — Pulse and similar, not the muzzle flash. */
+  ring: boolean;
 }
 
 export interface Beam {
@@ -79,12 +81,27 @@ export interface Spark {
   color: string;
 }
 
+export type SlashKind = "hook" | "loop" | "ring";
+
+export interface Slash {
+  id: number;
+  heading: number;
+  /** +1 first slash (left→right), −1 second slash (right→left). */
+  sign: number;
+  kind: SlashKind;
+  radius: number;
+  lift: number;
+  age: number;
+  life: number;
+}
+
 export const combat = {
   bolts: [] as Bolt[],
   traps: [] as GroundTrap[],
   bursts: [] as Burst[],
   beams: [] as Beam[],
   sparks: [] as Spark[],
+  slashes: [] as Slash[],
   nextId: 1,
   cooldownUntil: 0,
 };
@@ -95,17 +112,24 @@ export function clearCombat(): void {
   combat.bursts.length = 0;
   combat.beams.length = 0;
   combat.sparks.length = 0;
+  combat.slashes.length = 0;
   combat.cooldownUntil = 0;
 }
 
 export function applyPlayerDamage(raw: number): void {
   const store = useGameStore.getState();
-  const now = performance.now() / 1000;
-  const warded = now < runtime.wardUntil;
+  const warded = runtime.wardLeft > 0;
   const afterWard = warded ? raw * 0.4 : raw;
   const damage = afterWard * (1 - store.stats.armor / 100);
   runtime.health = Math.max(0, runtime.health - damage);
   runtime.hitFlash = 1;
+  if (warded) {
+    runtime.wardUntil = 0;
+    runtime.wardLeft = 0;
+    runtime.wardMax = 0;
+    spawnBurst(runtime.playerX, (runtime.playerY ?? 0) + 1.05, runtime.playerZ, "#9be7ff", 0.55, false);
+    spraySparks(runtime.playerX, (runtime.playerY ?? 0) + 1.05, runtime.playerZ, 0, 1, 0, "#9be7ff", 10, 3.2, 1.6);
+  }
 }
 
 export function hurtActiveBoss(amount: number, tags: { piercing?: boolean; explosive?: boolean }): number {
@@ -181,8 +205,10 @@ export function tryFireSkill(now: number, heading: number, px: number, py: numbe
   const flatZ = dirZ / flatLen;
 
   if (def.type === "defense") {
-    runtime.wardUntil = now + 2.2 + level * 0.25;
-    spawnBurst(px, originY, pz, def.color);
+    const duration = 30;
+    runtime.wardUntil = now + duration;
+    runtime.wardLeft = duration;
+    runtime.wardMax = duration;
     runtime.charge = 0;
     return true;
   }
@@ -190,9 +216,9 @@ export function tryFireSkill(now: number, heading: number, px: number, py: numbe
   if (def.type === "placed") {
     combat.traps.push({
       id: combat.nextId++,
-      x: px + flatX * 1.4,
-      z: pz + flatZ * 1.4,
-      armIn: 0.7,
+      x: px + flatX * 2.4,
+      z: pz + flatZ * 2.4,
+      armIn: 0.55,
       life: 16,
       damage,
       explosive: hasMod(mods, "explosive"),
@@ -233,7 +259,11 @@ export function tryFireSkill(now: number, heading: number, px: number, py: numbe
         hurtActiveBoss(damage * 0.45, { piercing: true });
       }
     }
-    spawnBurst(px + dirX * 1.1, originY + dirY * 1.1, pz + dirZ * 1.1, def.color);
+    if (def.type === "melee") {
+      spawnSlash(heading);
+    } else {
+      spawnBurst(px + dirX * 1.1, originY + dirY * 1.1, pz + dirZ * 1.1, def.color, 0.85, true);
+    }
     runtime.charge = 0;
     return true;
   }
@@ -289,19 +319,29 @@ export function tryFireSkill(now: number, heading: number, px: number, py: numbe
       pierced: [],
     });
   }
-  spawnBurst(spawnX + dirX * 0.25, spawnY + dirY * 0.25, spawnZ + dirZ * 0.25, def.color);
+  spawnBurst(spawnX + dirX * 0.2, spawnY + dirY * 0.2, spawnZ + dirZ * 0.2, def.color, 0.16);
   runtime.charge = 0;
   return true;
 }
 
-export function spawnBurst(x: number, y: number, z: number, color: string, size = 1): void {
-  combat.bursts.push({ id: combat.nextId++, x, y, z, age: 0, color, size });
+export function spawnBurst(x: number, y: number, z: number, color: string, size = 1, ring = false): void {
+  combat.bursts.push({ id: combat.nextId++, x, y, z, age: 0, color, size, ring });
+}
+
+function spawnSlash(heading: number): void {
+  combat.slashes.length = 0;
+  combat.slashes.push(
+    { id: combat.nextId++, heading, sign: 1, kind: "hook", radius: 1.18, lift: 1.02, age: 0, life: 0.2 },
+    { id: combat.nextId++, heading, sign: -1, kind: "hook", radius: 1.18, lift: 0.92, age: -0.14, life: 0.2 },
+    { id: combat.nextId++, heading, sign: 1, kind: "loop", radius: 0.15, lift: 1.05, age: -0.28, life: 0.34 },
+    { id: combat.nextId++, heading, sign: 1, kind: "ring", radius: 1.05, lift: 0.72, age: -0.28, life: 0.3 }
+  );
 }
 
 /** Flash + sparks at the point a skill connects with a boss. */
 export function spawnImpact(x: number, y: number, z: number, color: string): void {
   audio.impact();
-  spawnBurst(x, y, z, color, 1.15);
+  spawnBurst(x, y, z, color, 1.15, false);
   spraySparks(x, y, z, 0, 1, 0, color, 10, 4.2, 1.4);
 }
 
@@ -396,6 +436,14 @@ function spawnSplit(from: Bolt): void {
 export function stepCombat(dt: number): void {
   const store = useGameStore.getState();
   const half = 168;
+
+  if (runtime.wardLeft > 0) {
+    runtime.wardLeft = Math.max(0, runtime.wardLeft - dt);
+    if (runtime.wardLeft <= 0) {
+      runtime.wardUntil = 0;
+      runtime.wardMax = 0;
+    }
+  }
 
   for (let i = combat.bolts.length - 1; i >= 0; i--) {
     const b = combat.bolts[i];
@@ -523,6 +571,11 @@ export function stepCombat(dt: number): void {
     s.y += s.vy * dt;
     s.z += s.vz * dt;
     if (s.age > 0.48) combat.sparks.splice(i, 1);
+  }
+
+  for (let i = combat.slashes.length - 1; i >= 0; i--) {
+    combat.slashes[i].age += dt;
+    if (combat.slashes[i].age > combat.slashes[i].life) combat.slashes.splice(i, 1);
   }
 
   for (let i = combat.bursts.length - 1; i >= 0; i--) {

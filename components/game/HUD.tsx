@@ -65,6 +65,8 @@ export function HUD() {
   const [inFight, setInFight] = useState(false);
   const [nearAltar, setNearAltar] = useState(false);
   const [yaw, setYaw] = useState(0);
+  const [wardLeft, setWardLeft] = useState(0);
+  const [wardMax, setWardMax] = useState(0);
 
   // Sample the per-frame runtime values on a slow interval so the HUD
   // never forces the 3D loop to re-render React.
@@ -86,6 +88,8 @@ export function HUD() {
       setBossName(runtime.bossId ? BOSSES[runtime.bossId].name : "");
       setNearAltar(runtime.nearAltarId !== null);
       setYaw(runtime.camYaw);
+      setWardLeft(runtime.wardLeft);
+      setWardMax(runtime.wardMax);
     }, 100);
     return () => clearInterval(interval);
   }, []);
@@ -340,6 +344,23 @@ export function HUD() {
           className="h-1.5 bg-white/10"
           indicatorClassName={corruption >= 50 ? "bg-red-600" : "bg-rose-800"}
         />
+
+        {wardLeft > 0.05 && wardMax > 0 && (
+          <>
+            <div className="mt-2.5 mb-1 flex items-center justify-between text-cyan-100/80">
+              <span className="flex items-center gap-1.5">
+                <Shield className="size-3.5 text-cyan-300" />
+                <span className="text-[11px] font-medium tracking-widest uppercase">Ward</span>
+              </span>
+              <span className="font-mono text-[11px] text-cyan-100/70">{wardLeft.toFixed(1)}s</span>
+            </div>
+            <Progress
+              value={(wardLeft / wardMax) * 100}
+              className="h-1.5 bg-white/10"
+              indicatorClassName="bg-cyan-300"
+            />
+          </>
+        )}
 
         <div className="mt-3 flex items-center justify-center gap-2">
           <StatChip icon={<Gauge className="size-3.5" />} label="Speed" value={`×${stats.speed.toFixed(2)}`} color={POWERUP_INFO.speed.color} />

@@ -128,6 +128,39 @@ export function emptyLoadout(): Partial<Record<SkillId, ModifierId[]>> {
   return { arrow: [] };
 }
 
+/** Temporary testing kit: every skill and modifier from the first click. */
+const TESTING_UNLOCK_ALL = true;
+
+function testingKit(): Pick<
+  GameState,
+  | "unlockedSkills"
+  | "skillLevels"
+  | "ownedModifiers"
+  | "loadout"
+  | "activeSkill"
+  | "modifierSlots"
+  | "relics"
+  | "fragments"
+> {
+  const unlockedSkills = Object.keys(SKILLS) as SkillId[];
+  const skillLevels: Partial<Record<SkillId, number>> = {};
+  const loadout: Partial<Record<SkillId, ModifierId[]>> = {};
+  for (const id of unlockedSkills) {
+    skillLevels[id] = 1;
+    loadout[id] = [];
+  }
+  return {
+    unlockedSkills,
+    skillLevels,
+    ownedModifiers: Object.keys(MODIFIERS) as ModifierId[],
+    loadout,
+    activeSkill: "arrow",
+    modifierSlots: 3,
+    relics: ["slotII", "slotIII", "mastery"],
+    fragments: 80,
+  };
+}
+
 export function computePowerScore(state: {
   unlockedSkills: SkillId[];
   skillLevels: Partial<Record<SkillId, number>>;
@@ -226,15 +259,19 @@ export const useGameStore = create<GameState>((set, get) => ({
   lastPickup: null,
   powerLoot: [],
   lootTaken: [],
-  fragments: 0,
-  unlockedSkills: ["arrow"],
-  skillLevels: { arrow: 1 },
-  ownedModifiers: [],
-  loadout: emptyLoadout(),
-  activeSkill: "arrow",
+  ...(TESTING_UNLOCK_ALL
+    ? testingKit()
+    : {
+        fragments: 0,
+        unlockedSkills: ["arrow"] as SkillId[],
+        skillLevels: { arrow: 1 },
+        ownedModifiers: [] as ModifierId[],
+        loadout: emptyLoadout(),
+        activeSkill: "arrow" as SkillId,
+        relics: [] as RelicId[],
+        modifierSlots: 1,
+      }),
   keys: EMPTY_KEYS(),
-  relics: [],
-  modifierSlots: 1,
   corruption: 0,
   bossesDefeated: [],
   arenasOpened: [],
@@ -257,15 +294,19 @@ export const useGameStore = create<GameState>((set, get) => ({
         lastPickup: null,
         powerLoot: generatePowerLoot(session + Date.now()),
         lootTaken: [],
-        fragments: 0,
-        unlockedSkills: ["arrow"],
-        skillLevels: { arrow: 1 },
-        ownedModifiers: [],
-        loadout: emptyLoadout(),
-        activeSkill: "arrow",
+        ...(TESTING_UNLOCK_ALL
+          ? testingKit()
+          : {
+              fragments: 0,
+              unlockedSkills: ["arrow"] as SkillId[],
+              skillLevels: { arrow: 1 },
+              ownedModifiers: [] as ModifierId[],
+              loadout: emptyLoadout(),
+              activeSkill: "arrow" as SkillId,
+              relics: [] as RelicId[],
+              modifierSlots: 1,
+            }),
         keys: EMPTY_KEYS(),
-        relics: [],
-        modifierSlots: 1,
         corruption: 0,
         bossesDefeated: [],
         arenasOpened: [],
@@ -553,6 +594,7 @@ export const runtime = {
   camYaw: 0,
   camPitch: 0.32,
   playerX: 0,
+  playerY: 0,
   playerZ: 0,
   playerSafe: false,
   biome: "forest" as Biome,
@@ -588,6 +630,10 @@ export const runtime = {
   fireClicked: false,
   charge: 0,
   wardUntil: 0,
+  /** Seconds of Ward remaining. */
+  wardLeft: 0,
+  /** Full Ward duration when it was cast. */
+  wardMax: 0,
   corruption: 0,
   bossId: null as BossId | null,
   bossX: 0,
@@ -610,6 +656,7 @@ export function resetRuntime(stats: Stats = BASE_STATS.girl): void {
   runtime.camYaw = 0;
   runtime.camPitch = 0.32;
   runtime.playerX = 0;
+  runtime.playerY = 0;
   runtime.playerZ = 0;
   runtime.playerSafe = false;
   runtime.biome = "forest";
@@ -637,6 +684,8 @@ export function resetRuntime(stats: Stats = BASE_STATS.girl): void {
   runtime.fireClicked = false;
   runtime.charge = 0;
   runtime.wardUntil = 0;
+  runtime.wardLeft = 0;
+  runtime.wardMax = 0;
   runtime.corruption = 0;
   runtime.bossId = null;
   runtime.bossX = 0;

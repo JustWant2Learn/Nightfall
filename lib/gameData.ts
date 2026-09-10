@@ -110,7 +110,7 @@ export const SKILLS: Record<SkillId, SkillDef> = {
     slots: 1,
     color: "#9be7ff",
     glow: "#5ad4ff",
-    summary: "A glassy shell. Drinks the next few claws.",
+    summary: "A glassy shell. Lasts 30 seconds or until a hit.",
   },
   trap: {
     id: "trap",
